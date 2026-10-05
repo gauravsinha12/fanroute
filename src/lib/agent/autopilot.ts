@@ -95,6 +95,9 @@ export async function runAutopilot(brief: Brief, state: PlanState, emit: (event:
 
   const risks: string[] = [];
   if (route.longestDriveHours > (brief.maxDriveHours ?? 7)) risks.push(`Longest drive is ${route.longestDriveHours} h; it is split with a travel day.`);
+  for (const leg of route.legs.filter((l) => l.crossing)) {
+    risks.push(`${MARKETS_BY_ID.get(leg.from)?.name} to ${MARKETS_BY_ID.get(leg.to)?.name}: ${leg.crossing}. Book it early.`);
+  }
   const unscouted = route.stops.filter((s) => !state.scouts[s.market.id]).map((s) => s.market.name);
   if (unscouted.length) risks.push(`Not scouted yet: ${unscouted.join(", ")}. Venue picks there still need research.`);
   if (!touring) risks.push(`${brief.artist} is not in Qloo, so the plan follows the sound-alike artists' audience.`);

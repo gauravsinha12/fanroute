@@ -283,19 +283,29 @@ async function placeTags(query: string): Promise<string[]> {
   return ids;
 }
 
-async function placesNear(signal: string[], market: Market, categories: string[], take: number): Promise<PlaceRef[]> {
-  const tagIds = (await mapLimit(categories, 3, placeTags)).flat();
+const PLACE_KINDS = {
+  venue: { tags: ["music venue", "concert hall", "live music"], match: /music|venue|concert|club|theat|hall|ballroom|amphithe|auditorium|live/i },
+  hangout: { tags: ["record store", "cocktail bar", "coffee shop"], match: /record|vinyl|music store|bar|pub|brew|tap|coffee|cafe|café|cocktail|lounge/i },
+};
+
+async function placesNear(signal: string[], market: Market, kind: keyof typeof PLACE_KINDS, take: number): Promise<PlaceRef[]> {
+  const { tags, match } = PLACE_KINDS[kind];
+  const tagIds = (await mapLimit(tags, 3, placeTags)).flat();
   const params: QlooParams = {
     "filter.type": "urn:entity:place",
     "signal.interests.entities": signal,
     "filter.location.query": market.query,
-    take,
+    take: tagIds.length ? take : 50,
   };
   if (tagIds.length) {
     params["filter.tags"] = tagIds;
     params["operator.filter.tags"] = "union";
   }
-  return entitiesOf(await qlooGet("/v2/insights", params)).map(toPlace);
+  const places = entitiesOf(await qlooGet("/v2/insights", params)).map(toPlace);
+  if (tagIds.length) return places;
+  // Without a category tag the results are any places this audience likes;
+  // keep only the ones whose tags or name say what kind of place they are.
+  return places.filter((p) => match.test(`${p.name} ${p.tags.join(" ")}`)).slice(0, take);
 }
 
 async function hotspots(signal: string[], market: Market): Promise<Hotspot[]> {
@@ -330,8 +340,8 @@ export async function scoutMarket(artistIds: string[], marketId: string): Promis
   if (!market) throw new Error(`Unknown market ${marketId}`);
   const [spots, venues, hangouts] = await Promise.all([
     hotspots(artistIds, market).catch(() => []),
-    placesNear(artistIds, market, ["music venue", "concert hall", "live music"], 6).catch(() => []),
-    placesNear(artistIds, market, ["record store", "cocktail bar", "coffee shop"], 5).catch(() => []),
+    placesNear(artistIds, market, "venue", 6).catch(() => []),
+    placesNear(artistIds, market, "hangout", 5).catch(() => []),
   ]);
   return { marketId, name: market.name, hotspots: spots, venues, hangouts };
 }

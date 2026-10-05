@@ -297,6 +297,7 @@ export async function runTool(
         stops: state.route.stops.map((s) => ({ id: s.market.id, name: s.market.name, demand: s.score })),
         total_km: state.route.totalKm,
         longest_drive_hours: state.route.longestDriveHours,
+        crossings: state.route.legs.filter((l) => l.crossing).map((l) => `${l.from}->${l.to}: ${l.crossing}`),
         calendar: state.route.days.map((d) => `${d.date} ${d.kind} ${d.marketId}${d.note ? ` (${d.note})` : ""}`),
       });
     }

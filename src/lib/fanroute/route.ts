@@ -10,6 +10,7 @@ export interface RouteLeg {
   to: string;
   km: number;
   driveHours: number;
+  crossing?: string; // ferry or tunnel needed on this leg
 }
 
 export interface TourDay {
@@ -49,13 +50,32 @@ export function haversineKm(a: { lat: number; lon: number }, b: { lat: number; l
   return 2 * EARTH_KM * Math.asin(Math.sqrt(h));
 }
 
+const ISLANDS: Record<string, string> = { GB: "Great Britain", IE: "Ireland" };
+
+// Legs between Great Britain, Ireland and the continent need a ferry or the
+// Channel Tunnel, which straight-line distance does not show.
+export function waterCrossing(a: Market, b: Market): string | undefined {
+  const ia = ISLANDS[a.country];
+  const ib = ISLANDS[b.country];
+  if (ia === ib) return undefined;
+  if (ia && ib) return "Irish Sea ferry";
+  if (ia === "Great Britain" || ib === "Great Britain") return "Channel crossing (ferry or Eurotunnel)";
+  return "Ferry from Ireland";
+}
+
 export function roadKm(a: Market, b: Market): number {
   return Math.round(haversineKm(a, b) * ROAD_FACTOR);
 }
 
+// Distance used when choosing and ordering stops: a water crossing costs about
+// as much time as 350 km of extra driving.
+function costKm(a: Market, b: Market): number {
+  return roadKm(a, b) + (waterCrossing(a, b) ? 350 : 0);
+}
+
 function pathKm(path: Market[]): number {
   let total = 0;
-  for (let i = 1; i < path.length; i++) total += roadKm(path[i - 1], path[i]);
+  for (let i = 1; i < path.length; i++) total += costKm(path[i - 1], path[i]);
   return total;
 }
 
@@ -73,9 +93,9 @@ function bestInsertion(
     if (i === path.length && fixedLast && path.length > 0) continue;
     let added: number;
     if (path.length === 0) added = 0;
-    else if (i === 0) added = roadKm(candidate, path[0]);
-    else if (i === path.length) added = roadKm(path[i - 1], candidate);
-    else added = roadKm(path[i - 1], candidate) + roadKm(candidate, path[i]) - roadKm(path[i - 1], path[i]);
+    else if (i === 0) added = costKm(candidate, path[0]);
+    else if (i === path.length) added = costKm(path[i - 1], candidate);
+    else added = costKm(path[i - 1], candidate) + costKm(candidate, path[i]) - costKm(path[i - 1], path[i]);
     if (!best || added < best.addedKm) best = { index: i, addedKm: added };
   }
   return best;
@@ -160,7 +180,10 @@ export function planRoute(candidates: ScoredMarket[], options: RouteOptions): Ro
   const legs: RouteLeg[] = [];
   for (let i = 1; i < legPath.length; i++) {
     const km = roadKm(legPath[i - 1], legPath[i]);
-    legs.push({ from: legPath[i - 1].id, to: legPath[i].id, km, driveHours: Math.round((km / AVG_KMH) * 10) / 10 });
+    const crossing = waterCrossing(legPath[i - 1], legPath[i]);
+    // A crossing adds roughly half a day of check-in, sailing and customs.
+    const hours = km / AVG_KMH + (crossing ? 4 : 0);
+    legs.push({ from: legPath[i - 1].id, to: legPath[i].id, km, driveHours: Math.round(hours * 10) / 10, ...(crossing ? { crossing } : {}) });
   }
 
   // Calendar: one show per day; legs longer than the drive limit get travel

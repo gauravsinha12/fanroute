@@ -74,6 +74,47 @@ export function planToMarkdown(state: PlanState): string {
   return lines.join("\n");
 }
 
+function icsEscape(text: string) {
+  return text.replace(/[\\;,]/g, (c) => `\\${c}`).replace(/\n/g, "\\n");
+}
+
+// All-day events, one per show, so the dates drop straight into a calendar.
+export function planToIcs(state: PlanState): string {
+  const route = state.route;
+  if (!route) return "";
+  const stamp = new Date().toISOString().replace(/[-:]/g, "").slice(0, 15) + "Z";
+  const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Fanroute//Tour plan//EN", "CALSCALE:GREGORIAN"];
+  for (const day of route.days.filter((d) => d.kind === "show")) {
+    const market = MARKETS_BY_ID.get(day.marketId);
+    const stop = state.final?.stops.find((st) => st.market_id === day.marketId);
+    const venue = stop?.venue_pick ?? state.scouts[day.marketId]?.venues[0]?.name;
+    const start = day.date.replace(/-/g, "");
+    const end = new Date(`${day.date}T00:00:00Z`);
+    end.setUTCDate(end.getUTCDate() + 1);
+    lines.push(
+      "BEGIN:VEVENT",
+      `UID:${start}-${day.marketId}@fanroute`,
+      `DTSTAMP:${stamp}`,
+      `DTSTART;VALUE=DATE:${start}`,
+      `DTEND;VALUE=DATE:${end.toISOString().slice(0, 10).replace(/-/g, "")}`,
+      `SUMMARY:${icsEscape(`Show: ${market?.name ?? day.marketId}${venue ? ` (${venue}, hold)` : ""}`)}`,
+      `DESCRIPTION:${icsEscape(stop?.why ?? "Planned with Fanroute")}`,
+      "END:VEVENT",
+    );
+  }
+  lines.push("END:VCALENDAR");
+  return lines.join("\r\n");
+}
+
+function download(name: string, type: string, body: string) {
+  const url = URL.createObjectURL(new Blob([body], { type }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function Itinerary({ state, onFocus }: { state: PlanState; onFocus: (id: string) => void }) {
   const route = state.route;
   if (!route) return <Empty text="The itinerary appears once the route is built." />;
@@ -85,8 +126,15 @@ function Itinerary({ state, onFocus }: { state: PlanState; onFocus: (id: string)
         <div className="space-y-2">
           <div className="flex items-start justify-between gap-3">
             <h2 className="font-display text-2xl font-extrabold leading-tight">{f.title}</h2>
-            <span className="shrink-0 pt-1">
+            <span className="flex shrink-0 gap-1.5 pt-1">
               <CopyButton text={planToMarkdown(state)} label="Copy plan" />
+              <button
+                type="button"
+                onClick={() => download("fanroute-tour.ics", "text/calendar", planToIcs(state))}
+                className="rounded-md border border-line px-2.5 py-1 text-xs text-ink-2 hover:border-amber hover:text-ink"
+              >
+                Calendar
+              </button>
             </span>
           </div>
           <p className="text-[15px] leading-relaxed text-ink-2">{f.summary}</p>
