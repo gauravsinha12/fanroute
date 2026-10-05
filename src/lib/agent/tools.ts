@@ -53,7 +53,7 @@ export const FinalPlanSchema = z.object({
   support_acts: z.array(z.object({ name: z.string(), why: z.string() })).max(4),
   sponsors: z.array(z.object({ name: z.string(), angle: z.string().describe("The pitch angle in one sentence") })).max(5),
   promo: z.array(z.object({ name: z.string(), why: z.string() })).max(4),
-  venue_email: z.string().describe("Ready-to-send booking email for the first stop's venue pick, under 160 words"),
+  venue_email: z.string().describe("Ready-to-send booking email to the venue pick at the strongest stop, under 160 words"),
   sponsor_email: z.string().describe("Ready-to-send sponsorship pitch to the top sponsor, under 160 words"),
   risks: z.array(z.string()).max(4).describe("Honest caveats: thin data, long drives, small markets"),
 });
