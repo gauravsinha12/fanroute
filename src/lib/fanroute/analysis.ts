@@ -180,7 +180,8 @@ function nearestMarket(markets: Market[], lat: number, lon: number, maxKm: numbe
 }
 
 // One region-wide heatmap aggregated to localities: affinity is comparable
-// across cities because every city is scored in the same request.
+// across cities because every city is scored in the same request. Heatmap
+// calls leave `take` unset: insights caps it at 50, which would cut the grid.
 async function rankByLocalityHeatmap(signal: string[], region: Region): Promise<{ market: Market; affinity: number }[]> {
   const markets = marketsIn(region);
   const res = await qlooGet("/v2/insights", {
@@ -188,7 +189,6 @@ async function rankByLocalityHeatmap(signal: string[], region: Region): Promise<
     "filter.location": REGION_WKT[region],
     "output.heatmap.boundary": "urn:entity:locality",
     "signal.interests.entities": signal,
-    take: 500,
   });
   const points: QlooHeatmapPoint[] = res.results?.heatmap ?? [];
   const best = new Map<string, number>();
@@ -236,7 +236,6 @@ async function rankByCityHeatmaps(signal: string[], region: Region): Promise<{ m
         "filter.type": "urn:heatmap",
         "filter.location.query": market.query,
         "signal.interests.entities": signal,
-        take: 50,
       });
       const pops = (res.results?.heatmap ?? []).map((p) => p.query.popularity ?? 0).sort((a, b) => b - a).slice(0, 10);
       return pops.length ? { market, affinity: pops.reduce((s, v) => s + v, 0) / pops.length } : undefined;
@@ -319,7 +318,6 @@ async function hotspots(signal: string[], market: Market): Promise<Hotspot[]> {
       "filter.location.query": market.query,
       "output.heatmap.boundary": "urn:entity:locality",
       "signal.interests.entities": signal,
-      take: 40,
     });
     const points = pick(named.results?.heatmap ?? []);
     if (points.length >= 3) return points.slice(0, 40);
@@ -330,7 +328,6 @@ async function hotspots(signal: string[], market: Market): Promise<Hotspot[]> {
     "filter.type": "urn:heatmap",
     "filter.location.query": market.query,
     "signal.interests.entities": signal,
-    take: 80,
   });
   return pick(grid.results?.heatmap ?? []).slice(0, 80);
 }
