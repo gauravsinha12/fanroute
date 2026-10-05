@@ -418,3 +418,60 @@ export async function momentum(artistId: string): Promise<Momentum> {
           : `Cooling: down ${Math.abs(changePts)} percentile points in 90 days`;
   return { points, changePts, summary };
 }
+
+// ---------------------------------------------------------------- promoter mode
+
+export interface VenueReport {
+  venue: PlaceRef;
+  market: { id: string; name: string };
+  capacity: number;
+  band: { min: number; max: number };
+  artists: ArtistRef[];
+  sponsors: BrandRef[];
+  audience?: AudienceProfile;
+}
+
+// Rough popularity band an act needs to fill a room of this size. A heuristic,
+// shown to the user as one.
+export function popularityBand(capacity: number): { min: number; max: number } {
+  if (capacity < 200) return { min: 0.15, max: 0.6 };
+  if (capacity < 500) return { min: 0.35, max: 0.75 };
+  if (capacity < 1500) return { min: 0.55, max: 0.9 };
+  return { min: 0.75, max: 1 };
+}
+
+export async function searchVenues(query: string, marketId: string, take = 6): Promise<PlaceRef[]> {
+  const market = MARKETS_BY_ID.get(marketId);
+  if (!market) throw new Error(`Unknown market ${marketId}`);
+  const res = await qlooGet("/search", {
+    query,
+    types: "urn:entity:place",
+    "filter.location": `${market.lat},${market.lon}`,
+    "filter.radius": 30,
+    take,
+  });
+  return entitiesOf(res).map(toPlace);
+}
+
+// The venue itself is the taste signal: who does this room's crowd love?
+export async function venueReport(venueId: string, marketId: string, capacity: number, venueName?: string): Promise<VenueReport> {
+  const market = MARKETS_BY_ID.get(marketId);
+  if (!market) throw new Error(`Unknown market ${marketId}`);
+  const band = popularityBand(capacity);
+  const [venueRes, artistsRes, sponsors, audience] = await Promise.all([
+    qlooGet("/entities", { entity_ids: venueId }),
+    qlooGet("/v2/insights", {
+      "filter.type": "urn:entity:artist",
+      "signal.interests.entities": venueId,
+      "filter.popularity.min": band.min,
+      "filter.popularity.max": band.max,
+      take: 15,
+    }),
+    findSponsors([venueId], { attainableOnly: true, take: 8 }).catch(() => []),
+    audienceProfile([venueId]).catch(() => undefined),
+  ]);
+  const venue = entitiesOf(venueRes).map(toPlace)[0] ?? { id: venueId, name: venueName ?? "Your venue", tags: [] };
+  if (venueName && venue.name !== venueName && venue.name.endsWith("(demo)")) venue.name = venueName;
+  const artists = entitiesOf(artistsRes).map((e) => ({ ...toArtist(e), disambiguation: e.query?.affinity !== undefined ? `affinity ${round(e.query.affinity)}` : e.disambiguation }));
+  return { venue, market: { id: market.id, name: market.name }, capacity, band, artists, sponsors, audience };
+}

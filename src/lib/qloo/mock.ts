@@ -25,6 +25,8 @@ function rng(seed: string) {
   };
 }
 
+const titleCase = (text: string) => text.split(" ").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+
 const str = (v: QlooParams[string]) => (Array.isArray(v) ? v.join(",") : v === undefined ? "" : String(v));
 
 const DEMO_ARTISTS = [
@@ -170,12 +172,29 @@ export function mockQloo(path: string, params: QlooParams): QlooResponse {
   if (path === "/search") {
     const query = str(params.query).trim();
     if (!query) return { success: true, results: { entities: [] } };
+    if (str(params.types).includes("urn:entity:place")) {
+      const [lat, lon] = str(params["filter.location"]).split(",").map(Number);
+      const r = rng(`venue|${query}`);
+      const entities = Array.from({ length: 3 }, (_, i) => {
+        const name = i === 0 ? `${titleCase(query)} (demo)` : `${VENUE_PREFIX[Math.floor(r() * VENUE_PREFIX.length)]} ${VENUE_WORDS[Math.floor(r() * VENUE_WORDS.length)]}`;
+        return {
+          entity_id: `DEMO-PLC-${hash(name + i).toString(16).toUpperCase()}`,
+          name,
+          subtype: "urn:entity:place",
+          location: { lat: (lat || 40) + (r() - 0.5) * 0.05, lon: (lon || -74) + (r() - 0.5) * 0.05 },
+          properties: { address: `${100 + Math.floor(r() * 900)} Demo Ave` },
+          tags: [{ id: "urn:tag:category:place:music_venue", name: "Music Venue" }],
+        } satisfies QlooEntity;
+      });
+      return { success: true, results: { entities } };
+    }
     const matches = DEMO_ARTISTS.filter((a) => a.name.toLowerCase().includes(query.toLowerCase())).map((a) => demoArtist(a.name));
     return { success: true, results: { entities: matches.length ? matches : [demoArtist(query)] } };
   }
   if (path === "/entities") {
     const ids = str(params.entity_ids).split(",").filter(Boolean);
-    const entities = ids.map((id) => {
+    const entities = ids.map((id): QlooEntity => {
+      if (id.startsWith("DEMO-PLC-")) return { entity_id: id, name: "Your venue (demo)", subtype: "urn:entity:place", tags: [] };
       const known = DEMO_ARTISTS.find((a) => `DEMO-ART-${hash(a.name).toString(16).toUpperCase()}` === id);
       return known ? demoArtist(known.name) : { ...demoArtist(id), entity_id: id };
     });

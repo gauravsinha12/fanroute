@@ -17,6 +17,8 @@ You enter the artist (or paste a Spotify link), a few artists they sound like, t
 5. **Finds the money.** It surfaces brands the audience over-indexes on (filtered to ones small enough to sponsor an indie tour), support acts with overlapping fans in a realistic popularity band, and podcasts to pitch.
 6. **Writes the outreach.** It drafts a booking email for the strongest stop and a sponsorship pitch, plus the risks to check before booking.
 
+**Venue mode** turns this around for the people who book rooms. Pick a venue and its capacity. Fanroute then uses the venue itself as the Qloo taste signal to rank the artists its regulars love, filtered to a popularity band the room can hold. It also lists brands the crowd likes for local sponsorship, profiles the crowd, and writes a booking pitch for each act.
+
 Everything named in the plan comes from a Qloo result. The agent is instructed never to invent capacities, guarantees or contacts.
 
 ## Why it needs Qloo
@@ -48,6 +50,7 @@ A plain LLM can name famous venues, but it cannot know that fans of a particular
 | Podcasts | `/v2/insights` `filter.type=urn:entity:podcast` |
 | Audience | `/v2/insights` `filter.type=urn:demographics` |
 | Momentum | `/v2/trending` |
+| Venue mode | `/search` (places near a city), `/v2/insights` with the venue as `signal.interests.entities` for artists, brands and demographics |
 
 ## Run it
 

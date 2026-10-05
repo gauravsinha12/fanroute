@@ -74,6 +74,13 @@ const tagRes = await (async () => {
   return qlooGet("/v2/tags", { "filter.query": "music venue", take: 10 }).catch(() => undefined);
 })();
 
+const venueSearch = await run({ name: "search venue 'Empty Bottle' near Chicago", path: "/search", params: { query: "Empty Bottle", types: "urn:entity:place", "filter.location": "41.8781,-87.6298", "filter.radius": 30, take: 3 } });
+const venueId = venueSearch?.results?.entities?.[0]?.entity_id;
+if (venueId) {
+  await run({ name: "artists this venue's crowd loves (venue as signal)", path: "/v2/insights", params: { "filter.type": "urn:entity:artist", "signal.interests.entities": venueId, "filter.popularity.min": 0.35, "filter.popularity.max": 0.75, take: 5 } });
+  await run({ name: "demographics for the venue", path: "/v2/insights", params: { "filter.type": "urn:demographics", "signal.interests.entities": venueId } });
+}
+
 const venueTag = tagRes?.results?.tags?.find((t) => t.id.includes(":place"))?.id;
 if (venueTag) {
   await run({ name: `venues in Chicago via ${venueTag}`, path: "/v2/insights", params: { "filter.type": "urn:entity:place", ...signal, "filter.location.query": "Chicago", "filter.tags": venueTag, take: 5 } });

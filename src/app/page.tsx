@@ -2,10 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { BriefForm } from "@/components/BriefForm";
+import { PromoterForm, PromoterReport } from "@/components/Promoter";
 import { PlanPanel } from "@/components/PlanPanel";
 import { Timeline } from "@/components/Timeline";
 import { TourMap } from "@/components/TourMap";
 import type { Brief } from "@/lib/agent/autopilot";
+import type { VenueReport } from "@/lib/fanroute/analysis";
 import { usePlanStream } from "@/lib/client/usePlanStream";
 
 function ModeBadges({ mode }: { mode?: { qloo: "live" | "demo"; llm: "claude" | "autopilot" } }) {
@@ -28,6 +30,9 @@ export default function Home() {
   const [focus, setFocus] = useState<string | undefined>();
   const [mobileTab, setMobileTab] = useState<"agent" | "plan">("agent");
   const [status, setStatus] = useState<{ qloo: "live" | "demo"; llm: "claude" | "autopilot" }>();
+  const [side, setSide] = useState<"artist" | "venue">("artist");
+  const [report, setReport] = useState<VenueReport | null>(null);
+  const [venueBusy, setVenueBusy] = useState(false);
 
   useEffect(() => {
     fetch("/api/status")
@@ -47,6 +52,7 @@ export default function Home() {
           onClick={() => {
             plan.reset();
             setBrief(null);
+            setReport(null);
             setFocus(undefined);
           }}
           className="flex items-baseline gap-2"
@@ -66,7 +72,14 @@ export default function Home() {
         </div>
       )}
 
-      {!started ? (
+      {report ? (
+        <main className="flex-1 py-4">
+          <button type="button" onClick={() => setReport(null)} className="mb-4 text-sm text-ink-2 hover:text-amber">
+            ← Check another room
+          </button>
+          <PromoterReport report={report} />
+        </main>
+      ) : !started ? (
         <main className="grid flex-1 items-start gap-10 py-6 lg:grid-cols-[1.05fr_1fr] lg:py-12">
           <section className="space-y-8 lg:pt-6">
             <h1 className="font-display text-5xl leading-[0.95] font-extrabold tracking-tight sm:text-6xl">
@@ -91,16 +104,44 @@ export default function Home() {
             <p className="max-w-xl text-sm text-ink-3">
               Too small for streaming-platform geography to mean anything? Name a few artists you sound like. Fanroute follows their audience until yours catches up.
             </p>
+            <p className="max-w-xl text-sm text-ink-3">
+              Booking a room instead? Switch to venue mode to see which touring acts your regulars already love, sized to your capacity.
+            </p>
           </section>
-          <BriefForm
-            busy={plan.running}
-            onSubmit={(b) => {
-              setBrief(b);
-              setFocus(undefined);
-              setMobileTab("agent");
-              plan.start(b);
-            }}
-          />
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-1 rounded-xl border border-line bg-surface p-1" role="tablist" aria-label="Who are you planning for">
+              {(
+                [
+                  ["artist", "I'm an artist"],
+                  ["venue", "I book a venue"],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  role="tab"
+                  aria-selected={side === key}
+                  onClick={() => setSide(key)}
+                  className={`rounded-lg py-2 text-sm font-semibold ${side === key ? "bg-surface-2 text-ink" : "text-ink-3 hover:text-ink"}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {side === "artist" ? (
+              <BriefForm
+                busy={plan.running}
+                onSubmit={(b) => {
+                  setBrief(b);
+                  setFocus(undefined);
+                  setMobileTab("agent");
+                  plan.start(b);
+                }}
+              />
+            ) : (
+              <PromoterForm onReport={setReport} busy={venueBusy} setBusy={setVenueBusy} />
+            )}
+          </div>
         </main>
       ) : (
         <main className="grid min-h-0 flex-1 gap-4 pb-4 lg:grid-cols-[320px_minmax(0,1fr)_420px] lg:grid-rows-[minmax(0,1fr)]">
