@@ -1,26 +1,151 @@
 @import "tailwindcss";
 
+/* Night-drive palette: warm black, poster cream, stage amber, signal coral. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --bg: #f6f0e4;
+  --surface: #fffaf0;
+  --surface-2: #efe6d4;
+  --line: #ddd1ba;
+  --ink: #1d1a15;
+  --ink-2: #5d5547;
+  --ink-3: #8b8170;
+  --amber: #c9790a;
+  --amber-soft: #f3d39a;
+  --coral: #d9472f;
+  --teal: #1f7a6d;
+  --demo: #7a4dd8;
+  --shadow: 0 1px 0 rgba(29, 26, 21, 0.06), 0 8px 24px -12px rgba(29, 26, 21, 0.25);
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  :root:not([data-theme="light"]) {
+    --bg: #12100d;
+    --surface: #1b1814;
+    --surface-2: #24201a;
+    --line: #342e25;
+    --ink: #f3ead8;
+    --ink-2: #c4b8a2;
+    --ink-3: #8c826f;
+    --amber: #ffb547;
+    --amber-soft: #4a3517;
+    --coral: #ff6a4d;
+    --teal: #5cc8b4;
+    --demo: #b192ff;
+    --shadow: 0 1px 0 rgba(0, 0, 0, 0.4), 0 12px 32px -16px rgba(0, 0, 0, 0.8);
   }
 }
 
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-amber: var(--amber);
+  --color-amber-soft: var(--amber-soft);
+  --color-coral: var(--coral);
+  --color-teal: var(--teal);
+  --color-demo: var(--demo);
+  --font-display: var(--font-display);
+  --font-sans: var(--font-body);
+  --font-mono: var(--font-data);
+}
+
+html,
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body), system-ui, sans-serif;
+}
+
+::selection {
+  background: var(--amber);
+  color: #12100d;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+}
+
+/* Ticket-stub edge for itinerary rows. */
+.stub {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.stub::before,
+.stub::after {
+  content: "";
+  position: absolute;
+  left: 76px;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+}
+.stub::before {
+  top: -8px;
+}
+.stub::after {
+  bottom: -8px;
+}
+
+.field {
+  width: 100%;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.6rem 0.75rem;
+  color: var(--ink);
+  outline: none;
+}
+.field:focus {
+  border-color: var(--amber);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber) 25%, transparent);
+}
+
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+.pulse-dot {
+  animation: pulse-dot 1.2s ease-in-out infinite;
+}
+
+.maplibregl-popup-content {
+  background: var(--surface) !important;
+  color: var(--ink) !important;
+  border: 1px solid var(--line);
+  border-radius: 10px !important;
+  font-family: var(--font-body), system-ui, sans-serif;
+}
+.maplibregl-popup-tip {
+  border-top-color: var(--surface) !important;
+  border-bottom-color: var(--surface) !important;
+}
+.maplibregl-ctrl-attrib {
+  font-size: 10px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse-dot {
+    animation: none;
+  }
 }
