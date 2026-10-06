@@ -25,6 +25,7 @@ export interface PlanStream {
   followUp: (question: string) => void;
   stop: () => void;
   reset: () => void;
+  setPledges: (pledges: PlanState["pledges"]) => void;
 }
 
 const empty = (): PlanState => ({ artists: [], scouts: {} });
@@ -155,5 +156,13 @@ export function usePlanStream(): PlanStream {
     setMode(undefined);
   }, []);
 
-  return { state, timeline, running, mode, start, followUp, stop, reset };
+  const setPledges = useCallback((pledges: PlanState["pledges"]) => {
+    setState((s) => {
+      const next = { ...s, pledges };
+      stateRef.current = next;
+      return next;
+    });
+  }, []);
+
+  return { state, timeline, running, mode, start, followUp, stop, reset, setPledges };
 }

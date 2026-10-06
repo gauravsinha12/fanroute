@@ -34,6 +34,15 @@ export interface PlanState {
   momentum?: Momentum;
   route?: RoutePlan;
   final?: FinalPlan;
+  // Live fan pledges (PayPal authorizations) per city, sent by the client.
+  pledges?: { campaignId: string; totals: { marketId: string; pledged: number; goal: number; backers: number }[] };
+}
+
+// Up to 25 demand points for a city whose fans have already put money down.
+export function pledgeBonus(state: PlanState, marketId: string): number {
+  const t = state.pledges?.totals.find((x) => x.marketId === marketId);
+  if (!t || t.goal <= 0) return 0;
+  return Math.round(Math.min(1, t.pledged / t.goal) * 25);
 }
 
 export const FinalPlanSchema = z.object({
@@ -78,6 +87,7 @@ const inputs = {
   find_support_acts: z.object({ artist_ids: ArtistIds, popularity: z.number().min(0).max(1).optional() }),
   find_promo_channels: z.object({ artist_ids: ArtistIds }),
   check_momentum: z.object({ artist_id: z.string() }),
+  fan_pledges: z.object({}),
   plan_route: z.object({
     market_ids: z.array(z.string()).min(1).max(30),
     shows: z.number().int().min(1).max(30),
@@ -157,6 +167,12 @@ export const TOOL_DEFS: Anthropic.Beta.BetaTool[] = [
     name: "check_momentum",
     description: "90-day popularity trend for one artist (Qloo population percentile).",
     input_schema: { type: "object", properties: { artist_id: { type: "string" } }, required: ["artist_id"] },
+  },
+  {
+    name: "fan_pledges",
+    description:
+      "Money fans have already pledged (held by PayPal, not yet charged) per city, against each city's goal. plan_route automatically adds up to 25 demand points for pledged cities; use this to explain or adjust the routing.",
+    input_schema: { type: "object", properties: {} },
   },
   {
     name: "plan_route",
@@ -284,7 +300,7 @@ export async function runTool(
         }
       }
       if (pool.length === 0) throw new Error("None of market_ids are in the ranking; use IDs from rank_markets");
-      const candidates = pool.map((m) => ({ market: MARKETS_BY_ID.get(m.marketId)!, score: m.demand }));
+      const candidates = pool.map((m) => ({ market: MARKETS_BY_ID.get(m.marketId)!, score: Math.min(100, m.demand + pledgeBonus(state, m.marketId)) }));
       state.route = planRoute(candidates, {
         shows: args.shows,
         startId: args.start_market_id,
@@ -299,6 +315,13 @@ export async function runTool(
         longest_drive_hours: state.route.longestDriveHours,
         crossings: state.route.legs.filter((l) => l.crossing).map((l) => `${l.from}->${l.to}: ${l.crossing}`),
         calendar: state.route.days.map((d) => `${d.date} ${d.kind} ${d.marketId}${d.note ? ` (${d.note})` : ""}`),
+      });
+    }
+    case "fan_pledges": {
+      if (!state.pledges) return JSON.stringify({ open: false, note: "No pledge campaign is open for this tour." });
+      return JSON.stringify({
+        open: true,
+        cities: state.pledges.totals.map((t) => ({ market_id: t.marketId, pledged_usd: t.pledged, goal_usd: t.goal, fans: t.backers, demand_bonus: pledgeBonus(state, t.marketId) })),
       });
     }
     case "finalize_plan": {

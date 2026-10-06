@@ -19,6 +19,12 @@ You enter the artist (or paste a Spotify link), a few artists they sound like, t
 
 **Venue mode** turns this around for the people who book rooms. Pick a venue and its capacity. Fanroute then uses the venue itself as the Qloo taste signal to rank the artists its regulars love, filtered to a popularity band the room can hold. It also lists brands the crowd likes for local sponsorship, profiles the crowd, and writes a booking pitch for each act.
 
+**Fan pledges (PayPal)** let fans vote with money:
+- The artist opens a pledge campaign for the routed cities, plus the next-best markets.
+- Fans pledge a small amount for their city through PayPal. The order uses `intent: AUTHORIZE`, so the money is held, not charged.
+- When a city reaches its goal, the artist confirms and Fanroute captures every held pledge for that city. If the show doesn't happen, Fanroute voids them and nobody pays.
+- Pledged cities feed back into the agent: `plan_route` adds up to 25 demand points for cities fans have backed, and the `fan_pledges` tool lets the agent explain which cities pledges pulled into the route.
+
 Everything named in the plan comes from a Qloo result. The agent is instructed never to invent capacities, guarantees or contacts.
 
 ## Why it needs Qloo
@@ -35,6 +41,13 @@ A plain LLM can name famous venues, but it cannot know that fans of a particular
   2. destination affinity
   3. per-city heatmaps
 - **Router** (`src/lib/fanroute/route.ts`): greedy demand-versus-distance selection, 2-opt ordering, and a calendar with drive limits.
+- **Pledges** (`src/lib/paypal/client.ts`, `src/lib/pledges/store.ts`, `src/app/api/pledges/*`):
+  - PayPal Orders v2: create (AUTHORIZE) and authorize.
+  - PayPal Payments v2: capture and void authorizations.
+  - Idempotent requests (`PayPal-Request-Id`).
+  - The artist-only settle endpoint is protected by a per-campaign owner key.
+  - Storage is Upstash Redis when configured, otherwise a local JSON file.
+- **Tables:** AG Grid Community, themed with the app's CSS tokens, for markets and pledge tracking.
 - **Autopilot:** without an Anthropic key, a deterministic pipeline runs the same tools in a fixed order, so the product still works end to end.
 
 ### Qloo endpoints used
@@ -75,7 +88,7 @@ npx tsx scripts/agent-harness.mts  # agent loop against a scripted model
 
 ## Deploy
 
-On Vercel, import the repo and set `QLOO_API_KEY` and `ANTHROPIC_API_KEY`. The plan endpoint streams for up to 300 seconds (`maxDuration`).
+On Vercel, import the repo and set `QLOO_API_KEY` and `ANTHROPIC_API_KEY`. For pledges, also set the PayPal sandbox keys and the Upstash Redis keys (Vercel's filesystem doesn't persist). The plan endpoint streams for up to 300 seconds (`maxDuration`).
 
 ## License
 

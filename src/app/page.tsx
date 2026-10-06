@@ -174,7 +174,7 @@ export default function Home() {
               />
             </div>
             <div className={`${mobileTab === "plan" ? "flex" : "hidden"} min-h-[420px] flex-col lg:hidden`}>
-              <PlanPanel state={plan.state} onFocus={setFocus} />
+              <PlanPanel state={plan.state} onFocus={setFocus} artist={brief.artist} onPledges={plan.setPledges} />
             </div>
           </section>
 
@@ -205,7 +205,7 @@ export default function Home() {
           </section>
 
           <section className="card order-3 hidden min-h-0 flex-col p-4 lg:flex lg:h-full">
-            <PlanPanel state={plan.state} onFocus={setFocus} />
+            <PlanPanel state={plan.state} onFocus={setFocus} artist={brief.artist} onPledges={plan.setPledges} />
           </section>
         </main>
       )}

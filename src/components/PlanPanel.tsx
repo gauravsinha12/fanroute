@@ -1,10 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import type { ColDef } from "ag-grid-community";
 import type { PlanState } from "@/lib/agent/tools";
+import type { MarketScore } from "@/lib/fanroute/analysis";
 import { MARKETS_BY_ID } from "@/lib/fanroute/markets";
+import { DataGrid } from "./DataGrid";
+import { PledgePanel } from "./PledgePanel";
 
-const TABS = ["Itinerary", "Audience", "Partners", "Outreach", "Markets"] as const;
+const TABS = ["Dates", "Audience", "Partners", "Outreach", "Markets", "Pledges"] as const;
 type Tab = (typeof TABS)[number];
 
 const METHOD_NOTE: Record<string, string> = {
@@ -364,43 +368,57 @@ function Outreach({ state }: { state: PlanState }) {
   );
 }
 
+type MarketRow = MarketScore & { onRoute: boolean; pledged: number; fans: number };
+
 function Markets({ state, onFocus }: { state: PlanState; onFocus: (id: string) => void }) {
   const r = state.ranking;
   if (!r) return <Empty text="Markets appear once they are scored." />;
   const onRoute = new Set(state.route?.stops.map((s) => s.market.id));
+  const rows: MarketRow[] = r.markets.map((m) => {
+    const p = state.pledges?.totals.find((t) => t.marketId === m.marketId);
+    return { ...m, onRoute: onRoute.has(m.marketId), pledged: p?.pledged ?? 0, fans: p?.backers ?? 0 };
+  });
+  const columns: ColDef<MarketRow>[] = [
+    { field: "rank", headerName: "#", width: 58, sort: "asc" },
+    {
+      field: "name",
+      headerName: "City",
+      flex: 1.3,
+      minWidth: 120,
+      cellRenderer: (p: { data?: MarketRow }) =>
+        p.data ? (
+          <span>
+            {p.data.name}
+            {p.data.onRoute && <span className="ml-1.5 rounded bg-coral px-1 font-mono text-[10px] font-bold text-[#12100d]">ON TOUR</span>}
+          </span>
+        ) : null,
+    },
+    {
+      field: "demand",
+      headerName: "Demand",
+      flex: 1,
+      minWidth: 100,
+      cellRenderer: (p: { data?: MarketRow }) =>
+        p.data ? (
+          <span className="flex h-full items-center gap-2">
+            <span className="block h-1.5 w-14 overflow-hidden rounded-full bg-surface-2">
+              <span className="block h-full bg-amber" style={{ width: `${p.data.demand}%` }} />
+            </span>
+            <span className="font-mono text-xs">{p.data.demand}</span>
+          </span>
+        ) : null,
+    },
+    { field: "affinity", headerName: "Affinity", width: 92, valueFormatter: (p) => (typeof p.value === "number" ? p.value.toFixed(2) : "") },
+    ...(state.pledges ? [{ field: "pledged", headerName: "Pledged $", width: 100 } as ColDef<MarketRow>] : []),
+  ];
   return (
     <div className="space-y-3">
       <p className="text-sm text-ink-2">
         <span className="font-semibold text-ink">How this was measured: </span>
         {METHOD_NOTE[r.method]} Demand blends that affinity (75%) with metro size (25%).
+        {state.pledges && " Pledged cities get up to 25 extra demand points when the agent re-routes."}
       </p>
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-left text-[11px] uppercase tracking-wider text-ink-3">
-            <th className="py-1 font-normal">#</th>
-            <th className="py-1 font-normal">City</th>
-            <th className="w-2/5 py-1 font-normal">Demand</th>
-            <th className="py-1 text-right font-normal">Affinity</th>
-          </tr>
-        </thead>
-        <tbody>
-          {r.markets.map((m) => (
-            <tr key={m.marketId} className="border-t border-line">
-              <td className="py-1.5 font-mono text-xs text-ink-3">{m.rank}</td>
-              <td className="py-1.5">
-                <button type="button" onClick={() => onFocus(m.marketId)} className="text-left hover:text-amber">
-                  {m.name}
-                  {onRoute.has(m.marketId) && <span className="ml-1.5 rounded bg-coral px-1 font-mono text-[10px] font-bold text-[#12100d]">ON TOUR</span>}
-                </button>
-              </td>
-              <td className="py-1.5 pr-3">
-                <Bar value={m.demand} max={100} />
-              </td>
-              <td className="py-1.5 text-right font-mono text-xs">{m.affinity.toFixed(2)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <DataGrid rows={rows} columns={columns} height={460} getRowId={(m) => m.marketId} onRowClick={(m) => onFocus(m.marketId)} />
     </div>
   );
 }
@@ -409,11 +427,21 @@ function Empty({ text }: { text: string }) {
   return <p className="py-6 text-center text-sm text-ink-3">{text}</p>;
 }
 
-export function PlanPanel({ state, onFocus }: { state: PlanState; onFocus: (id: string) => void }) {
-  const [tab, setTab] = useState<Tab>("Itinerary");
+export function PlanPanel({
+  state,
+  onFocus,
+  artist,
+  onPledges,
+}: {
+  state: PlanState;
+  onFocus: (id: string) => void;
+  artist: string;
+  onPledges: (pledges: PlanState["pledges"]) => void;
+}) {
+  const [tab, setTab] = useState<Tab>("Dates");
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center gap-0.5 border-b border-line pb-2" role="tablist">
+      <div className="scroll-none flex items-center gap-0.5 overflow-x-auto border-b border-line pb-2" role="tablist">
         {TABS.map((t) => (
           <button
             key={t}
@@ -421,18 +449,19 @@ export function PlanPanel({ state, onFocus }: { state: PlanState; onFocus: (id: 
             role="tab"
             aria-selected={tab === t}
             onClick={() => setTab(t)}
-            className={`shrink-0 rounded-md px-2 py-1.5 text-[13px] font-medium ${tab === t ? "bg-surface-2 text-ink" : "text-ink-3 hover:text-ink"}`}
+            className={`shrink-0 rounded-md px-1.5 py-1.5 text-[13px] font-medium ${tab === t ? "bg-surface-2 text-ink" : "text-ink-3 hover:text-ink"}`}
           >
             {t}
           </button>
         ))}
       </div>
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto pt-4 pr-1" role="tabpanel">
-        {tab === "Itinerary" && <Itinerary state={state} onFocus={onFocus} />}
+        {tab === "Dates" && <Itinerary state={state} onFocus={onFocus} />}
         {tab === "Audience" && <Audience state={state} />}
         {tab === "Partners" && <Partners state={state} />}
         {tab === "Outreach" && <Outreach state={state} />}
         {tab === "Markets" && <Markets state={state} onFocus={onFocus} />}
+        {tab === "Pledges" && <PledgePanel state={state} artist={artist} onTotals={onPledges} />}
       </div>
     </div>
   );
