@@ -45,6 +45,7 @@ export function DataGrid<T>({
         columnDefs={columns}
         defaultColDef={{ sortable: true, resizable: true, suppressMovable: true }}
         animateRows
+        suppressNoRowsOverlay={rows.length > 0}
         getRowId={getRowId ? (p) => getRowId(p.data) : undefined}
         onRowClicked={onRowClick ? (e: RowClickedEvent<T>) => e.data && onRowClick(e.data) : undefined}
       />
