@@ -2,10 +2,12 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { BlobPreconditionFailedError, get as blobGet, put as blobPut } from "@vercel/blob";
 
 // Fan pledge campaigns. Persistence is a tiny key-value layer: Upstash Redis
-// over REST when configured (needed on serverless hosts), otherwise a JSON
-// file in the OS temp dir for local runs.
+// over REST or a private Vercel Blob store when configured (one of them is
+// needed on serverless hosts, where each route runs in its own instance),
+// otherwise a JSON file in the OS temp dir for local runs.
 
 export interface CampaignCity {
   marketId: string;
@@ -54,7 +56,18 @@ export interface CityTotals {
 interface KV {
   get(key: string): Promise<string | null>;
   set(key: string, value: string): Promise<void>;
+  /** Read-modify-write that is safe across processes where the backend allows it. */
+  update(key: string, fn: (current: string | null) => string): Promise<string>;
 }
+
+// Backends without compare-and-swap rely on the in-process lock in withLock.
+const naiveUpdate =
+  (get: KV["get"], set: KV["set"]): KV["update"] =>
+  async (key, fn) => {
+    const next = fn(await get(key));
+    await set(key, next);
+    return next;
+  };
 
 function upstash(): KV | undefined {
   const url = process.env.UPSTASH_REDIS_REST_URL;
@@ -65,7 +78,52 @@ function upstash(): KV | undefined {
     if (!res.ok) throw new Error(`Upstash ${res.status}`);
     return ((await res.json()) as { result: string | null }).result;
   };
-  return { get: (k) => cmd(["GET", k]), set: async (k, v) => void (await cmd(["SET", k, v])) };
+  const get: KV["get"] = (k) => cmd(["GET", k]);
+  const set: KV["set"] = async (k, v) => void (await cmd(["SET", k, v]));
+  return { get, set, update: naiveUpdate(get, set) };
+}
+
+// Private Vercel Blob store: one JSON blob per key. Reads skip the CDN cache,
+// and updates are conditional on the ETag that was read, so two instances
+// writing the same campaign retry instead of overwriting each other.
+function vercelBlob(): KV | undefined {
+  if (!process.env.BLOB_READ_WRITE_TOKEN) return undefined;
+  const pathname = (key: string) => `fanroute/${key.replace(":", "/")}.json`;
+  const read = async (key: string): Promise<{ text: string; etag: string } | null> => {
+    const res = await blobGet(pathname(key), { access: "private", useCache: false });
+    if (!res || res.statusCode !== 200) return null;
+    // A compressed response can carry the weak form (W/"…") of the same ETag,
+    // which a conditional write never matches.
+    return { text: await new Response(res.stream).text(), etag: res.blob.etag.replace(/^W\//, "") };
+  };
+  const write = (key: string, value: string, opts: { ifMatch?: string; create?: boolean } = {}) =>
+    blobPut(pathname(key), value, {
+      access: "private",
+      contentType: "application/json",
+      addRandomSuffix: false,
+      allowOverwrite: !opts.create,
+      ...(opts.ifMatch ? { ifMatch: opts.ifMatch } : {}),
+    });
+  return {
+    get: async (key) => (await read(key))?.text ?? null,
+    set: async (key, value) => void (await write(key, value)),
+    async update(key, fn) {
+      for (let attempt = 0; ; attempt++) {
+        const current = await read(key);
+        const next = fn(current?.text ?? null);
+        try {
+          await write(key, next, current ? { ifMatch: current.etag } : { create: true });
+          return next;
+        } catch (err) {
+          // Someone else wrote first: an ETag mismatch, or the blob now exists.
+          const conflict = err instanceof BlobPreconditionFailedError || (!current && /exist/i.test(String(err)));
+          if (process.env.STORE_DEBUG) console.error(`[store] attempt ${attempt} conflict=${conflict} etag=${current?.etag} ${String(err).slice(0, 80)}`);
+          if (!conflict || attempt >= 6) throw err;
+          await new Promise((r) => setTimeout(r, 40 * (attempt + 1) + Math.random() * 60));
+        }
+      }
+    },
+  };
 }
 
 const FILE = path.join(os.tmpdir(), "fanroute-pledges.json");
@@ -80,9 +138,15 @@ const fileKV: KV = {
     fileCache[key] = value;
     await fs.writeFile(FILE, JSON.stringify(fileCache));
   },
+  update: (key, fn) => naiveUpdate(fileKV.get, fileKV.set)(key, fn),
 };
 
-const kv = (): KV => upstash() ?? fileKV;
+const kv = (): KV => upstash() ?? vercelBlob() ?? fileKV;
+
+export function storeMode(): "upstash" | "vercel-blob" | "file" {
+  if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) return "upstash";
+  return process.env.BLOB_READ_WRITE_TOKEN ? "vercel-blob" : "file";
+}
 
 // Writes for one campaign are serialized so concurrent pledges don't drop
 // each other in the read-modify-write below.
@@ -123,21 +187,34 @@ export async function listPledges(campaignId: string): Promise<Pledge[]> {
 
 export async function addPledge(p: Omit<Pledge, "id" | "createdAt" | "status">): Promise<Pledge> {
   return withLock(p.campaignId, async () => {
-    const all = await listPledges(p.campaignId);
-    const existing = all.find((x) => x.orderId === p.orderId);
-    if (existing) return existing; // a retried authorize must not double count
-    const pledge: Pledge = { ...p, id: newId("pl"), status: "authorized", createdAt: new Date().toISOString() };
-    all.push(pledge);
-    await kv().set(`pledges:${p.campaignId}`, JSON.stringify(all));
-    return pledge;
+    let result: Pledge | undefined;
+    await kv().update(`pledges:${p.campaignId}`, (raw) => {
+      const all = JSON.parse(raw ?? "[]") as Pledge[];
+      const existing = all.find((x) => x.orderId === p.orderId);
+      if (existing) {
+        result = existing; // a retried authorize must not double count
+        return JSON.stringify(all);
+      }
+      result = { ...p, id: newId("pl"), status: "authorized", createdAt: new Date().toISOString() };
+      return JSON.stringify([...all, result]);
+    });
+    return result!;
   });
 }
 
+// `fn` may call PayPal, so it runs once, outside the store's retry loop; the
+// changed pledges are then merged into whatever is stored at write time, so a
+// pledge that arrives meanwhile isn't lost.
 export async function updatePledges(campaignId: string, fn: (all: Pledge[]) => Promise<Pledge[]>): Promise<Pledge[]> {
   return withLock(campaignId, async () => {
-    const next = await fn(await listPledges(campaignId));
-    await kv().set(`pledges:${campaignId}`, JSON.stringify(next));
-    return next;
+    const before = await listPledges(campaignId);
+    const snapshot = new Map(before.map((x) => [x.id, JSON.stringify(x)]));
+    const after = await fn(before); // fn may mutate `before` in place
+    const changed = new Map(after.filter((x) => snapshot.get(x.id) !== JSON.stringify(x)).map((x) => [x.id, x]));
+    const raw = await kv().update(`pledges:${campaignId}`, (cur) =>
+      JSON.stringify((JSON.parse(cur ?? "[]") as Pledge[]).map((x) => changed.get(x.id) ?? x)),
+    );
+    return JSON.parse(raw) as Pledge[];
   });
 }
 

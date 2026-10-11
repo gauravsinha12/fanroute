@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",
+    "@vercel/blob": "^2.8.1",
     "ag-grid-community": "^36.2.0",
     "ag-grid-react": "^36.2.0",
     "maplibre-gl": "^6.12.0",

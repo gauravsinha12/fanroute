@@ -46,7 +46,7 @@ A plain LLM can name famous venues, but it cannot know that fans of a particular
   - PayPal Payments v2: capture and void authorizations.
   - Idempotent requests (`PayPal-Request-Id`).
   - The artist-only settle endpoint is protected by a per-campaign owner key.
-  - Storage is Upstash Redis when configured, otherwise a local JSON file.
+  - Storage is Upstash Redis or a private Vercel Blob store when configured, otherwise a local JSON file. Blob writes are conditional on the ETag that was read, so concurrent pledges from different serverless instances retry instead of overwriting each other.
 - **Tables:** AG Grid Community, themed with the app's CSS tokens, for markets and pledge tracking.
 - **Autopilot:** without an Anthropic key, a deterministic pipeline runs the same tools in a fixed order, so the product still works end to end.
 
@@ -88,7 +88,7 @@ npx tsx scripts/agent-harness.mts  # agent loop against a scripted model
 
 ## Deploy
 
-On Vercel, import the repo and set `QLOO_API_KEY` and `ANTHROPIC_API_KEY`. For pledges, also set the PayPal sandbox keys and the Upstash Redis keys (Vercel's filesystem doesn't persist). The plan endpoint streams for up to 300 seconds (`maxDuration`).
+On Vercel, import the repo and set `QLOO_API_KEY` and `ANTHROPIC_API_KEY`. For pledges, also set the PayPal sandbox keys and connect a private Blob store (`vercel blob create-store <name> --access private`, which sets `BLOB_READ_WRITE_TOKEN`) or set the Upstash Redis keys. Vercel's filesystem isn't shared between routes. The plan endpoint streams for up to 300 seconds (`maxDuration`).
 
 ## License
 
