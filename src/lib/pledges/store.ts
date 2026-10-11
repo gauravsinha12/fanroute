@@ -166,7 +166,23 @@ export async function createCampaign(input: Omit<Campaign, "id" | "createdAt" | 
   const campaign: Campaign = { ...input, id: newId("tour"), createdAt: new Date().toISOString(), ownerKeyHash: hash(ownerKey) };
   await kv().set(`campaign:${campaign.id}`, JSON.stringify(campaign));
   await kv().set(`pledges:${campaign.id}`, "[]");
+  await kv().update(`artist:${artistSlug(campaign.artist)}`, (raw) => JSON.stringify([...(JSON.parse(raw ?? "[]") as string[]), campaign.id]));
   return { campaign, ownerKey };
+}
+
+export const artistSlug = (name: string) =>
+  name
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "") || "artist";
+
+/** Open campaigns for an artist, newest first. */
+export async function findCampaignsByArtist(artist: string): Promise<Campaign[]> {
+  const ids = JSON.parse((await kv().get(`artist:${artistSlug(artist)}`)) ?? "[]") as string[];
+  const found = await Promise.all(ids.slice(-10).map((id) => getCampaign(id)));
+  return found.filter((c): c is Campaign => Boolean(c)).reverse();
 }
 
 export async function getCampaign(id: string): Promise<Campaign | undefined> {

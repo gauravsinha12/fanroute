@@ -34,11 +34,11 @@ function loadSdk(clientId: string, currency: string): Promise<void> {
   });
 }
 
-export function FanPledgePage({ id }: { id: string }) {
+export function FanPledgePage({ id, initialCity = null }: { id: string; initialCity?: string | null }) {
   const [campaign, setCampaign] = useState<PublicCampaign | null>(null);
   const [rows, setRows] = useState<CityTotals[]>([]);
   const [mode, setMode] = useState<{ mode: string; clientId: string | null }>();
-  const [city, setCity] = useState<string | null>(null);
+  const [city, setCity] = useState<string | null>(initialCity);
   const [message, setMessage] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const buttonsBox = useRef<HTMLDivElement>(null);

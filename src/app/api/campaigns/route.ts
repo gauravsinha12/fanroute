@@ -1,8 +1,25 @@
 import { z } from "zod";
 import { MARKETS_BY_ID } from "@/lib/fanroute/markets";
-import { createCampaign } from "@/lib/pledges/store";
+import { createCampaign, findCampaignsByArtist, listPledges, totals } from "@/lib/pledges/store";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+// Public lookup used by voice and agent clients: GET /api/campaigns?artist=Name
+// returns that artist's open pledge campaigns with city totals (no owner data).
+export async function GET(request: Request) {
+  const artist = new URL(request.url).searchParams.get("artist")?.trim();
+  if (!artist || artist.length > 120) return Response.json({ error: "Pass ?artist=" }, { status: 400 });
+  const campaigns = await findCampaignsByArtist(artist);
+  const out = await Promise.all(
+    campaigns.map(async (c) => {
+      const { ownerKeyHash: _hidden, ...publicCampaign } = c;
+      void _hidden;
+      return { campaign: publicCampaign, totals: totals(c, await listPledges(c.id)), url: `/c/${c.id}` };
+    }),
+  );
+  return Response.json({ artist, campaigns: out });
+}
 
 const Body = z.object({
   artist: z.string().trim().min(1).max(120),
