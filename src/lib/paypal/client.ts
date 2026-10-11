@@ -86,15 +86,38 @@ interface AuthorizedOrder {
   id: string;
   status: string;
   payer?: { name?: { given_name?: string }; email_address?: string };
-  purchase_units?: { custom_id?: string; payments?: { authorizations?: { id: string; status: string; expiration_time?: string }[] } }[];
+  purchase_units?: {
+    custom_id?: string;
+    payments?: { authorizations?: { id: string; status: string; expiration_time?: string; amount?: { currency_code: string; value: string } }[] };
+  }[];
 }
 
-export async function authorizeOrder(orderId: string): Promise<{ authorizationId: string; status: string; payerName?: string; expiresAt?: string }> {
-  if (paypalMode() === "demo") return { authorizationId: fakeId("AUTH"), status: "CREATED", payerName: "Demo fan" };
+export interface Authorization {
+  authorizationId: string;
+  status: string;
+  payerName?: string;
+  expiresAt?: string;
+  /** What the order was created for, so the caller can check it matches the pledge being recorded. */
+  customId?: string;
+  amount?: number;
+  currency?: string;
+}
+
+export async function authorizeOrder(orderId: string, demo?: { customId: string; amount: number; currency: string }): Promise<Authorization> {
+  if (paypalMode() === "demo") return { authorizationId: fakeId("AUTH"), status: "CREATED", payerName: "Demo fan", ...demo };
   const order = await call<AuthorizedOrder>(`/v2/checkout/orders/${encodeURIComponent(orderId)}/authorize`, {}, `authorize-${orderId}`);
-  const auth = order.purchase_units?.[0]?.payments?.authorizations?.[0];
+  const unit = order.purchase_units?.[0];
+  const auth = unit?.payments?.authorizations?.[0];
   if (!auth) throw new PayPalError("PayPal returned no authorization", 502);
-  return { authorizationId: auth.id, status: auth.status, payerName: order.payer?.name?.given_name, expiresAt: auth.expiration_time };
+  return {
+    authorizationId: auth.id,
+    status: auth.status,
+    payerName: order.payer?.name?.given_name,
+    expiresAt: auth.expiration_time,
+    customId: unit?.custom_id,
+    amount: auth.amount ? Number(auth.amount.value) : undefined,
+    currency: auth.amount?.currency_code,
+  };
 }
 
 export async function captureAuthorization(authorizationId: string): Promise<{ id: string; status: string }> {

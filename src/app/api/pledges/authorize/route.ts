@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { authorizeOrder, PayPalError } from "@/lib/paypal/client";
+import { authorizeOrder, PayPalError, voidAuthorization } from "@/lib/paypal/client";
 import { addPledge, getCampaign, listPledges, totals } from "@/lib/pledges/store";
 
 export const runtime = "nodejs";
@@ -23,7 +23,15 @@ export async function POST(request: Request) {
   const already = (await listPledges(campaignId)).find((p) => p.orderId === orderId);
   if (already) return Response.json({ pledge: already, totals: totals(campaign, await listPledges(campaignId)) });
   try {
-    const auth = await authorizeOrder(orderId);
+    const expected = { customId: `${campaignId}:${marketId}`, amount: campaign.pledgeAmount, currency: campaign.currency };
+    const auth = await authorizeOrder(orderId, expected);
+    // The order id comes from the client, so check PayPal's record of what the
+    // order was for. An order made for another campaign, city or amount is
+    // released instead of being counted here.
+    if (auth.customId !== expected.customId || auth.amount !== expected.amount || auth.currency !== expected.currency) {
+      await voidAuthorization(auth.authorizationId).catch((err) => console.error("void mismatched authorization failed", err));
+      return Response.json({ error: "This payment doesn't match the pledge" }, { status: 409 });
+    }
     const pledge = await addPledge({
       campaignId,
       marketId,
