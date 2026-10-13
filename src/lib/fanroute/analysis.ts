@@ -1,7 +1,7 @@
 import { qlooGet } from "@/lib/qloo/client";
 import type { QlooEntity, QlooHeatmapPoint, QlooParams } from "@/lib/qloo/types";
 import { haversineKm } from "./route";
-import { MARKETS_BY_ID, REGION_WKT, marketsIn, type Market, type Region } from "./markets";
+import { MARKETS_BY_ID, marketsIn, type Market, type Region } from "./markets";
 
 export interface ArtistRef {
   id: string;
@@ -24,7 +24,7 @@ export interface MarketScore {
 }
 
 export interface MarketRanking {
-  method: "locality-heatmap" | "destination-affinity" | "city-heatmaps";
+  method: "destination-affinity" | "city-heatmaps";
   markets: MarketScore[];
 }
 
@@ -179,31 +179,27 @@ function nearestMarket(markets: Market[], lat: number, lon: number, maxKm: numbe
   return best?.market;
 }
 
-// One region-wide heatmap aggregated to localities: affinity is comparable
-// across cities because every city is scored in the same request. Heatmap
-// calls leave `take` unset: insights caps it at 50, which would cut the grid.
-async function rankByLocalityHeatmap(signal: string[], region: Region): Promise<{ market: Market; affinity: number }[]> {
-  const markets = marketsIn(region);
-  const res = await qlooGet("/v2/insights", {
-    "filter.type": "urn:heatmap",
-    "filter.location": REGION_WKT[region],
-    "output.heatmap.boundary": "urn:entity:locality",
-    "signal.interests.entities": signal,
-  });
-  const points: QlooHeatmapPoint[] = res.results?.heatmap ?? [];
-  const best = new Map<string, number>();
-  for (const p of points) {
-    const market = nearestMarket(markets, p.location.latitude, p.location.longitude, 45);
-    const affinity = p.query.affinity ?? p.query.affinity_rank;
-    if (!market || affinity === undefined) continue;
-    best.set(market.id, Math.max(best.get(market.id) ?? 0, affinity));
-  }
-  return markets.filter((m) => best.has(m.id)).map((m) => ({ market: m, affinity: best.get(m.id)! }));
-}
+const sameName = (market: Market, e: QlooEntity) => {
+  const names = [e.name, e.properties?.geocode?.name].filter(Boolean).map((n) => n!.toLowerCase());
+  return names.includes(market.name.toLowerCase()) || names.includes(market.query.toLowerCase());
+};
 
-// Destination affinity: which cities the artist's audience gravitates to.
+// Destination affinity: how strongly this taste profile gravitates to each
+// city. Qloo scores destinations on one global scale, so cities are comparable.
+// A country-wide list covers the strongest cities in one call; any market not
+// in it gets its own call restricted to that city (about 0.4 s each).
 async function rankByDestinations(signal: string[], region: Region): Promise<{ market: Market; affinity: number }[]> {
   const markets = marketsIn(region);
+  const best = new Map<string, number>();
+  const record = (e: QlooEntity, candidates: Market[]) => {
+    const affinity = e.query?.affinity;
+    if (affinity === undefined) return;
+    const lat = e.location?.lat;
+    const lon = e.location?.lon ?? e.location?.lng;
+    const market = candidates.find((m) => sameName(m, e)) ?? (lat !== undefined && lon !== undefined ? nearestMarket(candidates, lat, lon, 45) : undefined);
+    if (market) best.set(market.id, Math.max(best.get(market.id) ?? 0, affinity));
+  };
+
   const countries = [...new Set(markets.map((m) => m.country))];
   const lists = await mapLimit(countries, 4, (country) =>
     qlooGet("/v2/insights", {
@@ -211,18 +207,24 @@ async function rankByDestinations(signal: string[], region: Region): Promise<{ m
       "signal.interests.entities": signal,
       "filter.geocode.country_code": country,
       take: 50,
-    }).then(entitiesOf),
+    })
+      .then(entitiesOf)
+      .catch(() => []),
   );
-  const best = new Map<string, number>();
-  for (const e of lists.flat()) {
-    const affinity = e.query?.affinity;
-    const lat = e.location?.lat;
-    const lon = e.location?.lon ?? e.location?.lng;
-    if (affinity === undefined) continue;
-    const byName = markets.find((m) => m.name.toLowerCase() === e.name.toLowerCase() || e.properties?.geocode?.name?.toLowerCase() === m.name.toLowerCase());
-    const market = byName ?? (lat !== undefined && lon !== undefined ? nearestMarket(markets, lat, lon, 45) : undefined);
-    if (market) best.set(market.id, Math.max(best.get(market.id) ?? 0, affinity));
-  }
+  for (const e of lists.flat()) record(e, markets);
+
+  const missing = markets.filter((m) => !best.has(m.id));
+  await mapLimit(missing, 6, async (market) => {
+    const local = await qlooGet("/v2/insights", {
+      "filter.type": "urn:entity:destination",
+      "signal.interests.entities": signal,
+      "filter.location.query": market.query,
+      take: 3,
+    })
+      .then(entitiesOf)
+      .catch(() => []);
+    for (const e of local) record(e, [market]);
+  });
   return markets.filter((m) => best.has(m.id)).map((m) => ({ market: m, affinity: best.get(m.id)! }));
 }
 
@@ -248,8 +250,7 @@ async function rankByCityHeatmaps(signal: string[], region: Region): Promise<{ m
 
 export async function rankMarkets(artistIds: string[], region: Region): Promise<MarketRanking> {
   const total = marketsIn(region).length;
-  const strategies: [MarketRanking["method"], typeof rankByLocalityHeatmap][] = [
-    ["locality-heatmap", rankByLocalityHeatmap],
+  const strategies: [MarketRanking["method"], typeof rankByDestinations][] = [
     ["destination-affinity", rankByDestinations],
     ["city-heatmaps", rankByCityHeatmaps],
   ];
@@ -277,7 +278,13 @@ async function placeTags(query: string): Promise<string[]> {
   if (cached) return cached;
   let tags = (await qlooGet("/v2/tags", { "filter.query": query, "filter.tag.types": "urn:tag:category:place", take: 5 })).results?.tags ?? [];
   if (tags.length === 0) tags = (await qlooGet("/v2/tags", { "filter.query": query, take: 10 })).results?.tags ?? [];
-  const ids = tags.filter((t) => t.id.includes(":place")).map((t) => t.id).slice(0, 3);
+  // Tag search is fuzzy ("music venue" also returns wedding venues and music
+  // schools), so keep only tags whose name contains the whole phrase.
+  const phrase = query.toLowerCase();
+  const ids = tags
+    .filter((t) => t.id.includes(":place") && t.name.toLowerCase().includes(phrase))
+    .map((t) => t.id)
+    .slice(0, 3);
   tagCache.set(query, ids);
   return ids;
 }
@@ -307,19 +314,41 @@ async function placesNear(signal: string[], market: Market, kind: keyof typeof P
   return places.filter((p) => match.test(`${p.name} ${p.tags.join(" ")}`)).slice(0, take);
 }
 
+// Average of a WKT outline's vertices: close enough to place a neighborhood pin.
+export function wktCentroid(wkt: string): { lat: number; lon: number } | undefined {
+  let lon = 0;
+  let lat = 0;
+  let n = 0;
+  for (const [, x, y] of wkt.matchAll(/(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)/g)) {
+    lon += Number(x);
+    lat += Number(y);
+    n++;
+  }
+  return n ? { lat: lat / n, lon: lon / n } : undefined;
+}
+
 async function hotspots(signal: string[], market: Market): Promise<Hotspot[]> {
   const pick = (points: QlooHeatmapPoint[]) =>
     points
       .map((p) => ({ name: p.name, lat: p.location.latitude, lon: p.location.longitude, affinity: round(p.query.affinity ?? p.query.affinity_rank ?? 0, 3) }))
       .sort((a, b) => b.affinity - a.affinity);
   try {
+    // With a locality boundary, the heatmap comes back as named neighborhoods
+    // (entities with a WKT outline) instead of geohash cells.
     const named = await qlooGet("/v2/insights", {
       "filter.type": "urn:heatmap",
       "filter.location.query": market.query,
       "output.heatmap.boundary": "urn:entity:locality",
       "signal.interests.entities": signal,
     });
-    const points = pick(named.results?.heatmap ?? []);
+    const neighborhoods: Hotspot[] = [];
+    for (const e of entitiesOf(named)) {
+      const at = e.boundary ? wktCentroid(e.boundary) : undefined;
+      // Drop outlines centred far away, such as the whole country.
+      if (!at || haversineKm(market, at) > 60) continue;
+      neighborhoods.push({ name: e.name, lat: at.lat, lon: at.lon, affinity: round(e.query?.affinity ?? 0, 3) });
+    }
+    const points = neighborhoods.length ? neighborhoods.sort((a, b) => b.affinity - a.affinity) : pick(named.results?.heatmap ?? []);
     if (points.length >= 3) return points.slice(0, 40);
   } catch {
     // fall through to the default geohash grid
@@ -395,17 +424,25 @@ export async function audienceProfile(artistIds: string[]): Promise<AudienceProf
   return { age, gender, skew: topAge ? `Strongest with ${topAge}, ${lean}` : "No demographic signal returned" };
 }
 
+// Qloo's trending endpoint returns nothing for a 90-day window but does answer
+// for a year, newest first and capped at `take`. So ask for the year and keep
+// the 90 days up to the newest point.
 export async function momentum(artistId: string): Promise<Momentum> {
   const end = new Date();
-  const start = new Date(end.getTime() - 90 * 86_400_000);
+  const start = new Date(end.getTime() - 365 * 86_400_000);
   const res = await qlooGet("/v2/trending", {
     "filter.type": "urn:entity:artist",
     "signal.interests.entities": artistId,
     "filter.start_date": start.toISOString().slice(0, 10),
     "filter.end_date": end.toISOString().slice(0, 10),
+    take: 50,
   });
-  const points = (res.results?.trending ?? [])
-    .filter((p) => p.population_percentile !== undefined)
+  const all = (res.results?.trending ?? [])
+    .filter((p) => p.population_percentile !== undefined && p.date)
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const newest = all.length ? Date.parse(all[all.length - 1].date) : 0;
+  const points = all
+    .filter((p) => Date.parse(p.date) >= newest - 90 * 86_400_000)
     .map((p) => ({ date: p.date, percentile: round(p.population_percentile!, 1) }));
   const changePts = points.length >= 2 ? round(points[points.length - 1].percentile - points[0].percentile, 1) : 0;
   const summary =

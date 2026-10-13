@@ -12,7 +12,6 @@ const TABS = ["Dates", "Audience", "Partners", "Outreach", "Markets", "Pledges"]
 type Tab = (typeof TABS)[number];
 
 const METHOD_NOTE: Record<string, string> = {
-  "locality-heatmap": "One Qloo heatmap across the whole region, aggregated to cities, so every city's affinity is measured on the same scale.",
   "destination-affinity": "Qloo destination affinity: how strongly this taste profile gravitates to each city.",
   "city-heatmaps": "A Qloo heatmap per city, scored by how prevalent this taste profile is in each city's strongest neighborhoods.",
 };

@@ -109,12 +109,6 @@ export const MARKETS: Market[] = [
 
 export const MARKETS_BY_ID = new Map(MARKETS.map((market) => [market.id, market]));
 
-// Bounding polygons (WKT, lon lat) used for region-wide locality heatmaps.
-export const REGION_WKT: Record<Region, string> = {
-  "north-america": "POLYGON((-125 24,-66 24,-66 50,-125 50,-125 24))",
-  europe: "POLYGON((-11 35,25 35,25 61,-11 61,-11 35))",
-};
-
 export function marketsIn(region: Region): Market[] {
   return MARKETS.filter((market) => market.region === region);
 }

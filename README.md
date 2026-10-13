@@ -36,10 +36,11 @@ A plain LLM can name famous venues, but it cannot know that fans of a particular
 - **Next.js 16** (App Router), TypeScript, Tailwind CSS 4, MapLibre GL with OpenFreeMap tiles.
 - **Agent:** Claude Opus 5.5 through the Anthropic SDK, in a streaming tool-use loop (`src/lib/agent/agent.ts`). It uses adaptive thinking with progress updates, so the UI shows what the agent is doing between tool calls. It has ten tools (`src/lib/agent/tools.ts`), and it finishes by calling `finalize_plan` with a validated, structured plan.
 - **Qloo client** (`src/lib/qloo/client.ts`): auth, retries, a response cache, and a demo mode.
-- **Analysis** (`src/lib/fanroute/analysis.ts`): market ranking has three strategies that fall back in order:
-  1. region-wide locality heatmap
-  2. destination affinity
-  3. per-city heatmaps
+- **Analysis** (`src/lib/fanroute/analysis.ts`): market ranking has two strategies that fall back in order:
+  1. destination affinity: Qloo scores every city on one global scale. One country-wide call covers the strongest cities, then any missing market gets its own city-restricted call (about 0.4 s each).
+  2. per-city heatmaps
+
+  The obvious alternative, one region-wide heatmap aggregated to localities, was tested against the live API and rejected: it returns about 77 MB and takes about 70 s for North America.
 - **Router** (`src/lib/fanroute/route.ts`): greedy demand-versus-distance selection, 2-opt ordering, and a calendar with drive limits.
 - **Pledges** (`src/lib/paypal/client.ts`, `src/lib/pledges/store.ts`, `src/app/api/pledges/*`):
   - PayPal Orders v2: create (AUTHORIZE) and authorize.
@@ -55,8 +56,8 @@ A plain LLM can name famous venues, but it cannot know that fans of a particular
 | Need | Endpoint |
 |---|---|
 | Artist lookup, Spotify links | `/search`, `/entities?external.spotify.ids=` |
-| City affinity across a region | `/v2/insights` `filter.type=urn:heatmap`, `output.heatmap.boundary=urn:entity:locality`, WKT region |
-| Neighborhood hotspots | `/v2/insights` `filter.type=urn:heatmap` + `filter.location.query` |
+| City affinity across a region | `/v2/insights` `filter.type=urn:entity:destination` + `filter.geocode.country_code`, then `filter.location.query` per missing city |
+| Neighborhood hotspots | `/v2/insights` `filter.type=urn:heatmap` + `filter.location.query` + `output.heatmap.boundary=urn:entity:locality` (named neighborhoods), falling back to geohash cells |
 | Venues and local partners | `/v2/insights` `filter.type=urn:entity:place` + place tags from `/v2/tags` |
 | Sponsors | `/v2/insights` `filter.type=urn:entity:brand` (+ `filter.popularity.max`) |
 | Support acts | `/v2/insights` `filter.type=urn:entity:artist` with a popularity band |

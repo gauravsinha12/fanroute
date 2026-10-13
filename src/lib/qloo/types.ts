@@ -25,8 +25,12 @@ export interface QlooEntity {
   name: string;
   subtype?: string;
   type?: string;
+  /** /search and /entities give a list of types instead of type/subtype. */
+  types?: string[];
   popularity?: number;
   disambiguation?: string;
+  /** WKT outline, returned for localities when a heatmap uses output.heatmap.boundary. */
+  boundary?: string;
   location?: { lat?: number; lon?: number; lng?: number; geohash?: string };
   properties?: {
     description?: string;
@@ -74,7 +78,7 @@ export interface QlooDemographics {
 export interface QlooTrendPoint {
   date: string;
   population_percentile?: number;
-  population_rank?: number;
+  population_rank?: number | string;
   population_rank_velocity?: number;
   velocity_fold_change?: number;
   population_percent_delta?: number;

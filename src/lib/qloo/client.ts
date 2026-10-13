@@ -33,6 +33,15 @@ export function toSearchParams(params: QlooParams): URLSearchParams {
   return search;
 }
 
+// /search and /entities return `results` as a bare array of entities, while the
+// v2 endpoints return `results: { entities | heatmap | tags | … }`. Callers only
+// ever see the second shape.
+function normalize(body: unknown): QlooResponse {
+  const value = body as QlooResponse & { results?: unknown };
+  if (Array.isArray(value.results)) return { ...value, results: { entities: value.results } };
+  return value as QlooResponse;
+}
+
 const cache = new Map<string, { at: number; value: QlooResponse }>();
 
 function cacheGet(key: string): QlooResponse | undefined {
@@ -85,7 +94,7 @@ export async function qlooGet(path: string, params: QlooParams): Promise<QlooRes
         const body = await res.text().catch(() => "");
         throw new QlooError(`Qloo ${res.status} on ${path}: ${body.slice(0, 300)}`, res.status, path);
       }
-      const value = (await res.json()) as QlooResponse;
+      const value = normalize(await res.json());
       cacheSet(key, value);
       return value;
     } catch (err) {

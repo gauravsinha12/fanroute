@@ -83,15 +83,6 @@ function insights(params: QlooParams): QlooResponse {
   const where = str(params["filter.location.query"]) || str(params["signal.location.query"]);
 
   if (type === "urn:heatmap") {
-    if (str(params["output.heatmap.boundary"]) === "urn:entity:locality" && str(params["filter.location"]).startsWith("POLYGON")) {
-      const heatmap: QlooHeatmapPoint[] = MARKETS.map((market) => ({
-        name: market.name,
-        entity_id: `DEMO-LOC-${market.id}`,
-        location: { latitude: market.lat, longitude: market.lon },
-        query: { affinity: affinityFor(signal, market.id), popularity: Math.min(1, market.metroMillions / 12) },
-      }));
-      return { success: true, results: { heatmap } };
-    }
     const market = MARKETS.find((m) => m.query.toLowerCase() === where.toLowerCase() || m.name.toLowerCase() === where.toLowerCase());
     const r = rng(`${signal}|grid|${where}`);
     const heatmap: QlooHeatmapPoint[] = Array.from({ length: 60 }, () => {
