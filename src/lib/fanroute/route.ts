@@ -170,9 +170,40 @@ export function planRoute(candidates: ScoredMarket[], options: RouteOptions): Ro
     chosen.add(pick.c.market.id);
   }
 
-  let ordered = path;
-  if (path.length > 3) {
-    ordered = roundTrip ? twoOpt([...path, start!.market]).slice(0, -1) : twoOpt(path);
+  const order = (p: Market[]) => (p.length > 3 ? (roundTrip ? twoOpt([...p, start!.market]).slice(0, -1) : twoOpt(p)) : p);
+  const value = (p: Market[]) =>
+    p.reduce((sum, m) => sum + (byId.get(m.id)?.score ?? 0), 0) - (pathKm(roundTrip ? [...p, start!.market] : p) / 100) * penalty;
+
+  // Greedy insertion locks in early picks near the start. Swap pass: replace a
+  // stop with an unused market whenever that raises demand minus driving.
+  let ordered = order(path);
+  let best = value(ordered);
+  const fixed = new Set([start?.market.id, end?.market.id].filter((id): id is string => Boolean(id)));
+  for (let round = 0, improved = true; improved && round < 40; round++) {
+    improved = false;
+    for (const out of ordered) {
+      if (fixed.has(out.id)) continue;
+      const without = ordered.filter((m) => m.id !== out.id);
+      for (const c of sorted) {
+        if (chosen.has(c.market.id)) continue;
+        const probe = roundTrip ? [...without, start!.market] : without;
+        const ins = bestInsertion(probe, c.market, Boolean(start), Boolean(end) || roundTrip);
+        if (!ins) continue;
+        const trial = without.slice();
+        trial.splice(Math.min(ins.index, trial.length), 0, c.market);
+        const reordered = order(trial);
+        const v = value(reordered);
+        if (v > best + 0.5) {
+          chosen.delete(out.id);
+          chosen.add(c.market.id);
+          ordered = reordered;
+          best = v;
+          improved = true;
+          break;
+        }
+      }
+      if (improved) break;
+    }
   }
   const stops = ordered.map((market) => byId.get(market.id)!);
   const legPath = roundTrip ? [...ordered, start!.market] : ordered;
