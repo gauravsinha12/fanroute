@@ -101,14 +101,16 @@ function bestInsertion(
   return best;
 }
 
-// Reverse segments while it shortens the drive; endpoints stay put.
-function twoOpt(path: Market[]): Market[] {
+// Reverse segments while it shortens the drive. The first stop stays put; the
+// last one only when it's a fixed end (otherwise the tail may be reversed too).
+function twoOpt(path: Market[], fixLast = true): Market[] {
   let best = path.slice();
   let improved = true;
+  const lastK = fixLast ? 1 : 0;
   while (improved) {
     improved = false;
-    for (let i = 1; i < best.length - 2; i++) {
-      for (let k = i + 1; k < best.length - 1; k++) {
+    for (let i = 1; i < best.length - 1 - lastK; i++) {
+      for (let k = i + 1; k < best.length - lastK; k++) {
         const candidate = best.slice(0, i).concat(best.slice(i, k + 1).reverse(), best.slice(k + 1));
         if (pathKm(candidate) + 1 < pathKm(best)) {
           best = candidate;
@@ -170,7 +172,7 @@ export function planRoute(candidates: ScoredMarket[], options: RouteOptions): Ro
     chosen.add(pick.c.market.id);
   }
 
-  const order = (p: Market[]) => (p.length > 3 ? (roundTrip ? twoOpt([...p, start!.market]).slice(0, -1) : twoOpt(p)) : p);
+  const order = (p: Market[]) => (p.length > 3 ? (roundTrip ? twoOpt([...p, start!.market]).slice(0, -1) : twoOpt(p, Boolean(end))) : p);
   const value = (p: Market[]) =>
     p.reduce((sum, m) => sum + (byId.get(m.id)?.score ?? 0), 0) - (pathKm(roundTrip ? [...p, start!.market] : p) / 100) * penalty;
 
