@@ -42,6 +42,24 @@ function normalize(body: unknown): QlooResponse {
   return value as QlooResponse;
 }
 
+// The hackathon key is rate limited, and a plan fires dozens of calls (scouting
+// runs per stop in parallel). Cap requests in flight so bursts don't hit 429s.
+const MAX_ATTEMPTS = 5;
+const MAX_IN_FLIGHT = 4;
+let inFlight = 0;
+const waiting: (() => void)[] = [];
+
+async function withSlot<T>(fn: () => Promise<T>): Promise<T> {
+  if (inFlight >= MAX_IN_FLIGHT) await new Promise<void>((resolve) => waiting.push(resolve));
+  inFlight++;
+  try {
+    return await fn();
+  } finally {
+    inFlight--;
+    waiting.shift()?.();
+  }
+}
+
 const cache = new Map<string, { at: number; value: QlooResponse }>();
 
 function cacheGet(key: string): QlooResponse | undefined {
@@ -78,16 +96,21 @@ export async function qlooGet(path: string, params: QlooParams): Promise<QlooRes
   }
 
   let lastError: unknown;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     try {
-      const res = await fetch(`${BASE_URL}${path}?${query}`, {
-        headers: { "X-Api-Key": apiKey, Accept: "application/json" },
-        signal: AbortSignal.timeout(TIMEOUT_MS),
-        cache: "no-store",
-      });
+      const res = await withSlot(() =>
+        fetch(`${BASE_URL}${path}?${query}`, {
+          headers: { "X-Api-Key": apiKey, Accept: "application/json" },
+          signal: AbortSignal.timeout(TIMEOUT_MS),
+          cache: "no-store",
+        }),
+      );
       if (res.status === 429 || res.status >= 500) {
         lastError = new QlooError(`Qloo ${res.status}`, res.status, path);
-        await new Promise((r) => setTimeout(r, 400 * 2 ** attempt));
+        // Honour Retry-After when Qloo sends it; otherwise back off exponentially with jitter.
+        const retryAfter = Number(res.headers.get("retry-after"));
+        const wait = retryAfter > 0 ? Math.min(retryAfter * 1000, 8000) : 600 * 2 ** attempt + Math.random() * 300;
+        await new Promise((r) => setTimeout(r, wait));
         continue;
       }
       if (!res.ok) {
