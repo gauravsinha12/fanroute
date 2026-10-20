@@ -30,7 +30,7 @@ await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
 process.env.GROQ_BASE_URL = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 process.env.GROQ_API_KEY = "test";
 
-const { runGroqAgent, GROQ_MODEL } = await import("../src/lib/agent/groq.ts");
+const { runGroqAgent, GROQ_MODEL } = await import("../src/lib/agent/groq");
 const events: { type: string }[] = [];
 const messages: Parameters<typeof runGroqAgent>[0]["messages"] = [{ role: "user", content: "Plan a tour" }];
 await runGroqAgent({ messages, state: { artists: [], scouts: {} }, emit: (e) => events.push(e) });
@@ -46,4 +46,4 @@ const checks: [string, boolean][] = [
   ["system prompt sent first", requests[3].messages[0].role === "system"],
 ];
 for (const [name, ok] of checks) console.log(`${ok ? "PASS" : "FAIL"} ${name}`);
-process.exit(checks.every(([, ok]) => ok) ? 0 : 1);
+process.exitCode = checks.every(([, ok]) => ok) ? 0 : 1;
