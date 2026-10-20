@@ -282,7 +282,9 @@ async function placeTags(query: string): Promise<string[]> {
   // schools), so keep only tags whose name contains the whole phrase.
   const phrase = query.toLowerCase();
   const ids = tags
-    .filter((t) => t.id.includes(":place") && t.name.toLowerCase().includes(phrase))
+    // Place tags come in several namespaces (urn:tag:category:place:…, but also
+    // urn:tag:setting:qloo:music_venue), so check the parent type too.
+    .filter((t) => (t.id.includes(":place") || t.parents?.some((p) => p.type === "urn:entity:place")) && t.name.toLowerCase().includes(phrase))
     .map((t) => t.id)
     .slice(0, 3);
   tagCache.set(query, ids);

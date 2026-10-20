@@ -42,16 +42,23 @@ function normalize(body: unknown): QlooResponse {
   return value as QlooResponse;
 }
 
-// The hackathon key is rate limited, and a plan fires dozens of calls (scouting
-// runs per stop in parallel). Cap requests in flight so bursts don't hit 429s.
+// The hackathon key allows 5 requests a second, and a plan fires dozens of
+// calls (scouting runs per stop in parallel). Cap requests in flight and space
+// their starts so bursts don't hit 429s.
 const MAX_ATTEMPTS = 5;
 const MAX_IN_FLIGHT = 4;
+const MIN_SPACING_MS = 230; // about 4 starts a second, under Qloo's 5/s
 let inFlight = 0;
+let nextStart = 0;
 const waiting: (() => void)[] = [];
 
 async function withSlot<T>(fn: () => Promise<T>): Promise<T> {
   if (inFlight >= MAX_IN_FLIGHT) await new Promise<void>((resolve) => waiting.push(resolve));
   inFlight++;
+  const now = Date.now();
+  const start = Math.max(now, nextStart);
+  nextStart = start + MIN_SPACING_MS;
+  if (start > now) await new Promise((r) => setTimeout(r, start - now));
   try {
     return await fn();
   } finally {

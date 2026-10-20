@@ -18,6 +18,7 @@ export interface QlooTag {
   id: string;
   name: string;
   type?: string;
+  parents?: { type: string }[];
 }
 
 export interface QlooEntity {
