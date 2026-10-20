@@ -8,7 +8,10 @@ const BASE_URL = process.env.GROQ_BASE_URL ?? "https://api.groq.com/openai/v1";
 export const GROQ_MODEL = process.env.GROQ_MODEL ?? "openai/gpt-oss-120b";
 // Used when a request outgrows the primary model's per-minute token limit
 // (free-tier limits differ per model).
-const FALLBACK_MODEL = process.env.GROQ_FALLBACK_MODEL ?? "meta-llama/llama-4-scout-17b-16e-instruct";
+const FALLBACK_MODEL = process.env.GROQ_FALLBACK_MODEL ?? "openai/gpt-oss-20b";
+// Free-tier Groq allows ~8k tokens per minute, and the output budget counts
+// against it, so keep the reply allowance small.
+const MAX_OUTPUT_TOKENS = Number(process.env.GROQ_MAX_OUTPUT_TOKENS ?? 2500);
 const MAX_TURNS = 16;
 const MAX_RATE_WAITS = 5;
 
@@ -23,12 +26,12 @@ export type GroqMessage =
   | { role: "assistant"; content: string | null; tool_calls?: ToolCall[] }
   | { role: "tool"; tool_call_id: string; content: string };
 
-const TOOLS = TOOL_DEFS.map((tool) => ({
+export const TOOLS = TOOL_DEFS.map((tool) => ({
   type: "function" as const,
   function: { name: tool.name, description: tool.description, parameters: tool.input_schema },
 }));
 
-class GroqError extends Error {
+export class GroqError extends Error {
   constructor(
     message: string,
     readonly status: number,
@@ -37,22 +40,36 @@ class GroqError extends Error {
   }
 }
 
-async function complete(model: string, messages: GroqMessage[], signal?: AbortSignal) {
+interface CompleteOptions {
+  system?: string;
+  tools?: typeof TOOLS;
+  toolChoice?: "auto" | "required" | { type: "function"; function: { name: string } };
+  maxTokens?: number;
+}
+
+export async function complete(model: string, messages: GroqMessage[], signal?: AbortSignal, opts: CompleteOptions = {}) {
   for (let wait = 0; ; wait++) {
     const res = await fetch(`${BASE_URL}/chat/completions`, {
       method: "POST",
       headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model,
-        messages: [{ role: "system", content: SYSTEM_PROMPT }, ...messages],
-        tools: TOOLS,
-        tool_choice: "auto",
+        messages: [{ role: "system", content: opts.system ?? SYSTEM_PROMPT }, ...messages],
+        ...(opts.tools === undefined || opts.tools.length ? { tools: opts.tools ?? TOOLS, tool_choice: opts.toolChoice ?? "auto" } : {}),
         temperature: 0.3,
-        max_completion_tokens: 8192,
+        max_completion_tokens: opts.maxTokens ?? MAX_OUTPUT_TOKENS,
+        ...(model.startsWith("openai/gpt-oss") ? { reasoning_effort: "low" } : {}),
       }),
       signal,
     });
-    if (res.ok) return (await res.json()) as { choices: { message: { content: string | null; tool_calls?: ToolCall[] } }[] };
+    if (res.ok) {
+      const json = (await res.json()) as {
+        choices: { message: { content: string | null; tool_calls?: ToolCall[] } }[];
+        usage?: { prompt_tokens: number; completion_tokens: number };
+      };
+      if (process.env.GROQ_DEBUG) console.log(`[groq] ${model} prompt=${json.usage?.prompt_tokens} completion=${json.usage?.completion_tokens}`);
+      return json;
+    }
     const body = await res.text().catch(() => "");
     // Rate limited: wait as long as Groq asks (capped) and try again.
     if (res.status === 429 && wait < MAX_RATE_WAITS) {

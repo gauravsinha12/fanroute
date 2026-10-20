@@ -13,12 +13,12 @@ export interface Brief {
   notes?: string;
 }
 
-// Runs the same tools as the agent in a fixed order and fills the plan from
-// templates. Used when no Anthropic key is configured, so the product still
-// works end to end; the UI labels these plans "Autopilot".
-export async function runAutopilot(brief: Brief, state: PlanState, emit: (event: AgentEvent) => void): Promise<void> {
+type Call = <T>(name: string, input: Record<string, unknown>) => Promise<T>;
+
+// Runs a tool the way the agent would, with the same timeline events.
+export function toolCaller(state: PlanState, emit: (event: AgentEvent) => void): Call {
   let n = 0;
-  const call = async <T>(name: string, input: Record<string, unknown>): Promise<T> => {
+  return async <T>(name: string, input: Record<string, unknown>): Promise<T> => {
     const id = `auto_${++n}`;
     const started = Date.now();
     emit({ type: "tool_start", id, name, input });
@@ -32,7 +32,27 @@ export async function runAutopilot(brief: Brief, state: PlanState, emit: (event:
       throw err;
     }
   };
+}
 
+// Runs the same tools as the agent in a fixed order and fills the plan from
+// templates. Used when no LLM key is configured, so the product still works
+// end to end; the UI labels these plans "Autopilot".
+export async function runAutopilot(brief: Brief, state: PlanState, emit: (event: AgentEvent) => void): Promise<void> {
+  const call = toolCaller(state, emit);
+  const { touringFound } = await gatherEvidence(brief, state, emit, call);
+  const final = templatePlan(brief, state, touringFound);
+  await call("finalize_plan", final as unknown as Record<string, unknown>);
+  emit({ type: "text", delta: `${final.title} is ready. Double-check the venue picks before sending the booking emails.` });
+}
+
+// Every Qloo tool in a fixed order: artists, then markets, audience, sponsors,
+// support acts, promo and momentum in parallel, then the route and scouting.
+export async function gatherEvidence(
+  brief: Brief,
+  state: PlanState,
+  emit: (event: AgentEvent) => void,
+  call: Call,
+): Promise<{ touringFound: boolean }> {
   emit({ type: "progress", text: `Looking up ${brief.artist}${brief.soundsLike.length ? ` and ${brief.soundsLike.length} sound-alike artists` : ""} in Qloo.` });
   const found = await call<{ query: string; candidates: { id: string; popularity_pct?: number }[] }[]>("find_artists", {
     names: [brief.artist, ...brief.soundsLike].slice(0, 5),
@@ -73,7 +93,12 @@ export async function runAutopilot(brief: Brief, state: PlanState, emit: (event:
   for (let i = 0; i < stopIds.length; i += 8) {
     await call("scout_markets", { artist_ids: signal, market_ids: stopIds.slice(i, i + 8) });
   }
+  return { touringFound: Boolean(touring) };
+}
 
+// The plan written from templates, straight from the gathered evidence.
+export function templatePlan(brief: Brief, state: PlanState, touringFound: boolean): FinalPlan {
+  const ranked = state.ranking!.markets;
   const route = state.route!;
   // Pitch the strongest stop first: that is where the data makes the best case.
   const lead = route.stops.slice().sort((a, b) => b.score - a.score)[0];
@@ -100,7 +125,7 @@ export async function runAutopilot(brief: Brief, state: PlanState, emit: (event:
   }
   const unscouted = route.stops.filter((s) => !state.scouts[s.market.id]).map((s) => s.market.name);
   if (unscouted.length) risks.push(`Not scouted yet: ${unscouted.join(", ")}. Venue picks there still need research.`);
-  if (!touring) risks.push(`${brief.artist} is not in Qloo, so the plan follows the sound-alike artists' audience.`);
+  if (!touringFound) risks.push(`${brief.artist} is not in Qloo, so the plan follows the sound-alike artists' audience.`);
 
   const final: FinalPlan = {
     title: `${brief.artist}: ${route.stops.length}-date ${brief.region === "europe" ? "Europe" : "North America"} run`,
@@ -126,8 +151,7 @@ ${brief.artist} team`,
       .join(", ")}…). Taste data shows our audience over-indexes on ${topSponsor?.name ?? "your brand"}, so a tour partnership would put you in front of people who already like you.\n\nOpen to a short call about on-site presence and co-branded merch?\n\nBest,\n${brief.artist} team`,
     risks,
   };
-  await call("finalize_plan", final as unknown as Record<string, unknown>);
-  emit({ type: "text", delta: `${final.title} is ready. Double-check the venue picks before sending the booking emails.` });
+  return final;
 }
 
 export function homeMarketLabel(homeBase?: string): string | undefined {

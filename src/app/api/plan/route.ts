@@ -2,6 +2,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { MODEL, llmMode, runAgent, type AgentEvent } from "@/lib/agent/agent";
 import { GROQ_MODEL, runGroqAgent, type GroqMessage } from "@/lib/agent/groq";
+import { runGroqWriter } from "@/lib/agent/groq-writer";
 import { homeMarketLabel, runAutopilot } from "@/lib/agent/autopilot";
 import { briefToPrompt } from "@/lib/agent/prompt";
 import type { PlanState } from "@/lib/agent/tools";
@@ -50,10 +51,13 @@ export async function POST(request: Request) {
           messages.push({ role: "user", content: prompt });
           await runAgent({ messages, state, emit, signal: request.signal });
           emit({ type: "history", messages });
-        } else if (llm === "groq") {
+        } else if (llm === "groq" && process.env.GROQ_AGENT === "full") {
           const messages = (history as GroqMessage[] | undefined) ?? [];
           messages.push({ role: "user", content: prompt });
           await runGroqAgent({ messages, state, emit, signal: request.signal });
+          emit({ type: "history", messages });
+        } else if (llm === "groq") {
+          const messages = await runGroqWriter({ brief, state, emit, followUp, history: (history as GroqMessage[] | undefined) ?? [], signal: request.signal });
           emit({ type: "history", messages });
         } else {
           await runAutopilot(brief, state, emit);
