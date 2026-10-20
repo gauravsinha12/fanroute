@@ -371,7 +371,11 @@ export async function scoutMarket(artistIds: string[], marketId: string): Promis
     placesNear(artistIds, market, "venue", 6).catch(() => []),
     placesNear(artistIds, market, "hangout", 5).catch(() => []),
   ]);
-  return { marketId, name: market.name, hotspots: spots, venues, hangouts };
+  // Location search occasionally returns a same-named place elsewhere; keep
+  // places that are actually in (or near) this market.
+  const local = (places: PlaceRef[]) =>
+    places.filter((p) => p.lat === undefined || p.lon === undefined || haversineKm(market, { lat: p.lat, lon: p.lon }) <= 60);
+  return { marketId, name: market.name, hotspots: spots, venues: local(venues), hangouts: local(hangouts) };
 }
 
 // ---------------------------------------------------------------- partners, peers, promo

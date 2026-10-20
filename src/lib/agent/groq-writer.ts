@@ -18,7 +18,7 @@ Rules:
 - Support acts, sponsors and promo names must come from their lists. Prefer sponsors a small act can actually reach.
 - Each "why" is one sentence citing the evidence: rank, demand, affinity, pledges.
 - The summary says who the audience is, where they are, and why this routing.
-- venue_email goes to the BOOKING EMAIL TARGET venue and cites that city's rank and date. sponsor_email pitches the top sponsor. Both are specific, short (under 160 words) and signed "<artist> team".
+- venue_email goes to your venue_pick at the BOOKING EMAIL TARGET city and cites that city's rank and date. Pick a venue that suits this artist's size and genre. sponsor_email pitches the top sponsor. Both are specific, short (under 160 words) and signed "<artist> team".
 - Describe driving exactly as the route evidence states, including every leg over the daily limit.
 - Use only numbers that appear in the evidence. Never invent capacities, guarantees, prices, show times, logistics or contacts. The venue email asks about holds for the listed date; it does not propose door times or terms.
 - Name 2 to 3 support acts, sponsors and promo podcasts when the lists have them.
@@ -94,8 +94,8 @@ export function evidenceBrief(brief: Brief, state: PlanState): string {
   const target = emailTarget(state);
   if (target) {
     lines.push(
-      `BOOKING EMAIL TARGET: ${target.venue ? `${target.venue} in ${target.city}` : `a venue in ${target.city} (none scouted)`}, show on ${target.date}, ${target.city} is rank #${target.rank} of ${target.of}, demand ${target.demand}.` +
-        (target.venue ? ` Use ${target.venue} as that stop's venue_pick.` : ""),
+      `BOOKING EMAIL TARGET: ${target.venue ? `the best-fitting scouted venue in ${target.city}` : `a venue in ${target.city} (none scouted)`}, show on ${target.date}, ${target.city} is rank #${target.rank} of ${target.of}, demand ${target.demand}.` +
+        " Address it to the venue_pick you choose for that stop."
     );
   }
   if (state.sponsors?.length) lines.push(`SPONSORS: ${state.sponsors.slice(0, 6).map((b) => `${b.name}${b.categories[0] ? ` (${b.categories[0]})` : ""}`).join("; ")}`);
@@ -148,8 +148,12 @@ export function groundPlan(plan: FinalPlan, fallback: FinalPlan, state: PlanStat
   let venueEmail = plan.venue_email;
   if (target?.venue) {
     const stop = stops.find((s) => s.market_id === target.marketId);
-    if (stop) stop.venue_pick = target.venue;
-    if (!norm(venueEmail).includes(norm(target.venue)) || !norm(venueEmail).includes(norm(target.city))) venueEmail = fallback.venue_email;
+    const venue = stop?.venue_pick ?? target.venue;
+    if (stop) stop.venue_pick = venue;
+    if (!norm(venueEmail).includes(norm(venue)) || !norm(venueEmail).includes(norm(target.city))) {
+      // The template email names the first scouted venue; point it at the pick.
+      venueEmail = fallback.venue_email.split(target.venue).join(venue);
+    }
   }
   return {
     ...plan,
