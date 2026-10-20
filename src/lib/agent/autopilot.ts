@@ -100,8 +100,9 @@ export async function gatherEvidence(
 export function templatePlan(brief: Brief, state: PlanState, touringFound: boolean): FinalPlan {
   const ranked = state.ranking!.markets;
   const route = state.route!;
-  // Pitch the strongest stop first: that is where the data makes the best case.
-  const lead = route.stops.slice().sort((a, b) => b.score - a.score)[0];
+  // Pitch the strongest stop that has a scouted venue: the data makes the best case there.
+  const byScore = route.stops.slice().sort((a, b) => b.score - a.score);
+  const lead = byScore.find((s) => state.scouts[s.market.id]?.venues.length) ?? byScore[0];
   const leadRank = ranked.find((m) => m.marketId === lead.market.id)?.rank;
   const leadVenue = state.scouts[lead.market.id]?.venues[0];
   const leadDate = route.days.find((d) => d.kind === "show" && d.marketId === lead.market.id)?.date;

@@ -18,7 +18,7 @@ Rules:
 - Support acts, sponsors and promo names must come from their lists. Prefer sponsors a small act can actually reach.
 - Each "why" is one sentence citing the evidence: rank, demand, affinity, pledges.
 - The summary says who the audience is, where they are, and why this routing.
-- venue_email goes to the venue pick at the strongest stop and cites that city's rank. sponsor_email pitches the top sponsor. Both are specific, short (under 160 words) and signed "<artist> team".
+- venue_email goes to the BOOKING EMAIL TARGET venue and cites that city's rank and date. sponsor_email pitches the top sponsor. Both are specific, short (under 160 words) and signed "<artist> team".
 - Describe driving exactly as the route evidence states, including every leg over the daily limit.
 - Use only numbers that appear in the evidence. Never invent capacities, guarantees, prices, show times, logistics or contacts. The venue email asks about holds for the listed date; it does not propose door times or terms.
 - Name 2 to 3 support acts, sponsors and promo podcasts when the lists have them.
@@ -28,6 +28,25 @@ const FOLLOW_UP_PROMPT = `You are Fanroute, a tour planner. Answer the artist's 
 
 const FINALIZE_ONLY = TOOLS.filter((t) => t.function.name === "finalize_plan");
 const pct = (n?: number) => (n === undefined ? "n/a" : `${Math.round(n * 100)}%`);
+
+// Who the booking email goes to: the strongest stop that has a scouted venue.
+export function emailTarget(state: PlanState) {
+  const route = state.route;
+  if (!route) return undefined;
+  const ranked = state.ranking?.markets ?? [];
+  const byScore = route.stops.slice().sort((a, b) => b.score - a.score);
+  const stop = byScore.find((s) => state.scouts[s.market.id]?.venues.length) ?? byScore[0];
+  if (!stop) return undefined;
+  return {
+    marketId: stop.market.id,
+    city: stop.market.name,
+    venue: state.scouts[stop.market.id]?.venues[0]?.name,
+    date: route.days.find((d) => d.kind === "show" && d.marketId === stop.market.id)?.date,
+    rank: ranked.find((m) => m.marketId === stop.market.id)?.rank,
+    of: ranked.length,
+    demand: stop.score,
+  };
+}
 
 export function evidenceBrief(brief: Brief, state: PlanState): string {
   const lines: string[] = [];
@@ -71,6 +90,13 @@ export function evidenceBrief(brief: Brief, state: PlanState): string {
           `\n   venues: ${list(scout?.venues, 4)}\n   neighborhoods: ${list(scout?.hotspots, 2)}\n   hangouts/shops: ${list(scout?.hangouts, 4)}`,
       );
     });
+  }
+  const target = emailTarget(state);
+  if (target) {
+    lines.push(
+      `BOOKING EMAIL TARGET: ${target.venue ? `${target.venue} in ${target.city}` : `a venue in ${target.city} (none scouted)`}, show on ${target.date}, ${target.city} is rank #${target.rank} of ${target.of}, demand ${target.demand}.` +
+        (target.venue ? ` Use ${target.venue} as that stop's venue_pick.` : ""),
+    );
   }
   if (state.sponsors?.length) lines.push(`SPONSORS: ${state.sponsors.slice(0, 6).map((b) => `${b.name}${b.categories[0] ? ` (${b.categories[0]})` : ""}`).join("; ")}`);
   if (state.supportActs?.length) lines.push(`SUPPORT ACTS: ${state.supportActs.slice(0, 6).map((a) => `${a.name}${a.genres[0] ? ` (${a.genres[0]})` : ""}`).join("; ")}`);
@@ -116,8 +142,18 @@ export function groundPlan(plan: FinalPlan, fallback: FinalPlan, state: PlanStat
     }
     return out.slice(0, max);
   };
+  // The booking email must be addressed to the target venue; if the model
+  // wrote it to someone else, use the template email instead.
+  const target = emailTarget(state);
+  let venueEmail = plan.venue_email;
+  if (target?.venue) {
+    const stop = stops.find((s) => s.market_id === target.marketId);
+    if (stop) stop.venue_pick = target.venue;
+    if (!norm(venueEmail).includes(norm(target.venue)) || !norm(venueEmail).includes(norm(target.city))) venueEmail = fallback.venue_email;
+  }
   return {
     ...plan,
+    venue_email: venueEmail,
     stops,
     support_acts: known(plan.support_acts, state.supportActs, fallback.support_acts, 4),
     sponsors: known(plan.sponsors, state.sponsors, fallback.sponsors, 5),
