@@ -1,6 +1,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
-import { runAgent, type AgentEvent } from "@/lib/agent/agent";
+import { MODEL, llmMode, runAgent, type AgentEvent } from "@/lib/agent/agent";
+import { GROQ_MODEL, runGroqAgent, type GroqMessage } from "@/lib/agent/groq";
 import { homeMarketLabel, runAutopilot } from "@/lib/agent/autopilot";
 import { briefToPrompt } from "@/lib/agent/prompt";
 import type { PlanState } from "@/lib/agent/tools";
@@ -33,21 +34,26 @@ export async function POST(request: Request) {
   const parsed = BodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: parsed.error.issues[0]?.message ?? "Invalid request" }, { status: 400 });
   const { brief, followUp, history } = parsed.data;
-  const useClaude = Boolean(process.env.ANTHROPIC_API_KEY) && process.env.FANROUTE_AUTOPILOT !== "1";
-  if (followUp && !useClaude) return Response.json({ error: "Follow-up questions need the Claude agent (ANTHROPIC_API_KEY)." }, { status: 400 });
+  const llm = llmMode();
+  if (followUp && llm === "autopilot") return Response.json({ error: "Follow-up questions need an LLM agent (ANTHROPIC_API_KEY or GROQ_API_KEY)." }, { status: 400 });
 
   const encoder = new TextEncoder();
   const body = new ReadableStream<Uint8Array>({
     async start(controller) {
       const emit = (event: AgentEvent) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
       const state: PlanState = { artists: [], scouts: {}, ...((parsed.data.state as Partial<PlanState>) ?? {}) };
-      emit({ type: "mode", qloo: qlooMode(), llm: useClaude ? "claude" : "autopilot" });
+      emit({ type: "mode", qloo: qlooMode(), llm, model: llm === "claude" ? MODEL : llm === "groq" ? GROQ_MODEL : undefined });
       try {
-        if (useClaude) {
+        const prompt = followUp ?? briefToPrompt({ ...brief, homeBase: homeMarketLabel(brief.homeBase) });
+        if (llm === "claude") {
           const messages = (history as Anthropic.Beta.BetaMessageParam[] | undefined) ?? [];
-          const prompt = followUp ?? briefToPrompt({ ...brief, homeBase: homeMarketLabel(brief.homeBase) });
           messages.push({ role: "user", content: prompt });
           await runAgent({ messages, state, emit, signal: request.signal });
+          emit({ type: "history", messages });
+        } else if (llm === "groq") {
+          const messages = (history as GroqMessage[] | undefined) ?? [];
+          messages.push({ role: "user", content: prompt });
+          await runGroqAgent({ messages, state, emit, signal: request.signal });
           emit({ type: "history", messages });
         } else {
           await runAutopilot(brief, state, emit);

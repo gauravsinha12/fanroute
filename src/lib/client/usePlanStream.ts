@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import type { AgentEvent } from "@/lib/agent/agent";
+import type { AgentEvent, LlmMode } from "@/lib/agent/agent";
 import type { Brief } from "@/lib/agent/autopilot";
 import type { PlanState } from "@/lib/agent/tools";
 
@@ -20,7 +20,7 @@ export interface PlanStream {
   state: PlanState;
   timeline: TimelineItem[];
   running: boolean;
-  mode?: { qloo: "live" | "demo"; llm: "claude" | "autopilot" };
+  mode?: { qloo: "live" | "demo"; llm: LlmMode; model?: string };
   start: (brief: Brief) => void;
   followUp: (question: string) => void;
   stop: () => void;
@@ -43,7 +43,7 @@ export function usePlanStream(): PlanStream {
   const apply = useCallback((event: AgentEvent) => {
     switch (event.type) {
       case "mode":
-        setMode({ qloo: event.qloo, llm: event.llm });
+        setMode({ qloo: event.qloo, llm: event.llm, model: event.model });
         break;
       case "progress":
         setTimeline((t) => [...t, { id: crypto.randomUUID(), kind: "progress", text: event.text }]);

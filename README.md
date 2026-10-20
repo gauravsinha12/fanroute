@@ -49,7 +49,8 @@ A plain LLM can name famous venues, but it cannot know that fans of a particular
   - The artist-only settle endpoint is protected by a per-campaign owner key.
   - Storage is Upstash Redis or a private Vercel Blob store when configured, otherwise a local JSON file. Blob writes are conditional on the ETag that was read, so concurrent pledges from different serverless instances retry instead of overwriting each other.
 - **Tables:** AG Grid Community, themed with the app's CSS tokens, for markets and pledge tracking.
-- **Autopilot:** without an Anthropic key, a deterministic pipeline runs the same tools in a fixed order, so the product still works end to end.
+- **Groq option:** with `GROQ_API_KEY` instead of an Anthropic key, the same tools and prompt run on an open model through Groq's OpenAI-compatible API (`src/lib/agent/groq.ts`, default `openai/gpt-oss-120b`). It waits out rate limits and falls back to a model with a larger per-minute token budget if a request is too big.
+- **Autopilot:** without an LLM key, a deterministic pipeline runs the same tools in a fixed order, so the product still works end to end.
 
 ### Qloo endpoints used
 

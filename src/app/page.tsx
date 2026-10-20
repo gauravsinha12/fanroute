@@ -6,11 +6,20 @@ import { PromoterForm, PromoterReport } from "@/components/Promoter";
 import { PlanPanel } from "@/components/PlanPanel";
 import { Timeline } from "@/components/Timeline";
 import { TourMap } from "@/components/TourMap";
+import type { LlmMode } from "@/lib/agent/agent";
 import type { Brief } from "@/lib/agent/autopilot";
 import type { VenueReport } from "@/lib/fanroute/analysis";
 import { usePlanStream } from "@/lib/client/usePlanStream";
 
-function ModeBadges({ mode }: { mode?: { qloo: "live" | "demo"; llm: "claude" | "autopilot" } }) {
+type Mode = { qloo: "live" | "demo"; llm: LlmMode; model?: string };
+
+function agentLabel(mode: Mode): string {
+  if (mode.llm === "claude") return "Agent · Claude Opus 5.5";
+  if (mode.llm === "groq") return `Agent · ${(mode.model ?? "open model").split("/").pop()} on Groq`;
+  return "Autopilot · no LLM";
+}
+
+function ModeBadges({ mode }: { mode?: Mode }) {
   if (!mode) return null;
   return (
     <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -18,7 +27,7 @@ function ModeBadges({ mode }: { mode?: { qloo: "live" | "demo"; llm: "claude" | 
         Qloo · {mode.qloo === "live" ? "live" : "demo data"}
       </span>
       <span className="rounded-full border border-line px-2.5 py-1 font-mono text-ink-2">
-        {mode.llm === "claude" ? "Agent · Claude Opus 5.5" : "Autopilot · no LLM"}
+        {agentLabel(mode)}
       </span>
     </div>
   );
@@ -29,7 +38,7 @@ export default function Home() {
   const [brief, setBrief] = useState<Brief | null>(null);
   const [focus, setFocus] = useState<string | undefined>();
   const [mobileTab, setMobileTab] = useState<"agent" | "plan">("agent");
-  const [status, setStatus] = useState<{ qloo: "live" | "demo"; llm: "claude" | "autopilot" }>();
+  const [status, setStatus] = useState<Mode>();
   const [side, setSide] = useState<"artist" | "venue">("artist");
   const [report, setReport] = useState<VenueReport | null>(null);
   const [venueBusy, setVenueBusy] = useState(false);
@@ -168,7 +177,7 @@ export default function Home() {
               <Timeline
                 items={plan.timeline}
                 running={plan.running}
-                canFollowUp={mode?.llm === "claude" && Boolean(plan.state.final)}
+                canFollowUp={mode !== undefined && mode.llm !== "autopilot" && Boolean(plan.state.final)}
                 onFollowUp={plan.followUp}
                 onStop={plan.stop}
               />

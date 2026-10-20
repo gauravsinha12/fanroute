@@ -3,16 +3,27 @@ import { SYSTEM_PROMPT } from "./prompt";
 import { TOOL_DEFS, runTool, type PlanState, type ToolEvent } from "./tools";
 
 export const MODEL = "claude-opus-5-5";
+
+export type LlmMode = "claude" | "groq" | "autopilot";
+
+// Claude when an Anthropic key is set, else Groq when a Groq key is set, else
+// the deterministic Autopilot. FANROUTE_AUTOPILOT=1 forces Autopilot.
+export function llmMode(): LlmMode {
+  if (process.env.FANROUTE_AUTOPILOT === "1") return "autopilot";
+  if (process.env.ANTHROPIC_API_KEY) return "claude";
+  if (process.env.GROQ_API_KEY) return "groq";
+  return "autopilot";
+}
 const MAX_TURNS = 16;
 
 export type AgentEvent =
   | ToolEvent
-  | { type: "mode"; qloo: "live" | "demo"; llm: "claude" | "autopilot" }
+  | { type: "mode"; qloo: "live" | "demo"; llm: LlmMode; model?: string }
   | { type: "progress"; text: string }
   | { type: "tool_start"; id: string; name: string; input: unknown }
   | { type: "tool_end"; id: string; name: string; ok: boolean; ms: number; error?: string }
   | { type: "text"; delta: string }
-  | { type: "history"; messages: Anthropic.Beta.BetaMessageParam[] }
+  | { type: "history"; messages: unknown[] }
   | { type: "error"; message: string }
   | { type: "done" };
 
