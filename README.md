@@ -49,7 +49,7 @@ A plain LLM can name famous venues, but it cannot know that fans of a particular
   - The artist-only settle endpoint is protected by a per-campaign owner key.
   - Storage is Upstash Redis or a private Vercel Blob store when configured, otherwise a local JSON file. Blob writes are conditional on the ETag that was read, so concurrent pledges from different serverless instances retry instead of overwriting each other.
 - **Tables:** AG Grid Community, themed with the app's CSS tokens, for markets and pledge tracking.
-- **Groq option:** with `GROQ_API_KEY` instead of an Anthropic key, the same tools and prompt run on an open model through Groq's OpenAI-compatible API (`src/lib/agent/groq.ts`, default `openai/gpt-oss-120b`). It waits out rate limits and falls back to a model with a larger per-minute token budget if a request is too big.
+- **Groq option:** with `GROQ_API_KEY` instead of an Anthropic key, Fanroute runs the Qloo tools in a fixed order, then gpt-oss-120b on Groq writes the plan from a compact evidence brief in one `finalize_plan` call (`src/lib/agent/groq-writer.ts`). A grounding pass keeps only names found in Qloo results, and follow-ups are answered from the same evidence. This fits Groq's free tier, about 8k tokens a minute, and takes roughly 30–40 s. With `GROQ_AGENT=full`, the open-ended tool loop runs on Groq instead (`src/lib/agent/groq.ts`); use that on a paid Groq tier.
 - **Autopilot:** without an LLM key, a deterministic pipeline runs the same tools in a fixed order, so the product still works end to end.
 
 ### Qloo endpoints used
@@ -78,7 +78,7 @@ npm run dev
 Open http://localhost:3000.
 
 - Without `QLOO_API_KEY`, the app runs on generated demo data with fictional names and says so on screen.
-- Without `ANTHROPIC_API_KEY`, it runs Autopilot instead of the agent.
+- With `GROQ_API_KEY` and no Anthropic key, it runs the Groq writer. With neither key, it runs Autopilot.
 
 Checks:
 
