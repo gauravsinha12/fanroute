@@ -19,6 +19,7 @@ Rules:
 - Each "why" is one sentence citing the evidence: rank, demand, affinity, pledges.
 - The summary says who the audience is, where they are, and why this routing.
 - venue_email goes to the venue pick at the strongest stop and cites that city's rank. sponsor_email pitches the top sponsor. Both are specific, short (under 160 words) and signed "<artist> team".
+- Describe driving exactly as the route evidence states, including every leg over the daily limit.
 - Use only numbers that appear in the evidence. Never invent capacities, guarantees, prices, show times, logistics or contacts. The venue email asks about holds for the listed date; it does not propose door times or terms.
 - Name 2 to 3 support acts, sponsors and promo podcasts when the lists have them.
 - Put thin data and real trade-offs in risks.`;
@@ -44,6 +45,19 @@ export function evidenceBrief(brief: Brief, state: PlanState): string {
   const route = state.route;
   if (route) {
     lines.push(`ROUTE (${route.stops.length} shows, ${route.totalKm} km, longest drive ${route.longestDriveHours} h):`);
+    // Spell out the long legs so the plan never understates the driving.
+    const limit = brief.maxDriveHours ?? 7;
+    const name = (id: string) => MARKETS_BY_ID.get(id)?.name ?? id;
+    const long = route.legs.filter((l) => l.driveHours > limit);
+    lines.push(
+      long.length
+        ? `LEGS OVER THE ${limit} H DAILY LIMIT (split with travel days): ${long.map((l) => `${name(l.from)} to ${name(l.to)} ${l.driveHours} h`).join("; ")}`
+        : `Every leg is within the ${limit} h daily limit.`,
+    );
+    if (route.stops.length && route.legs.length >= route.stops.length) {
+      const home = route.legs[route.legs.length - 1];
+      lines.push(`DRIVE HOME after the last show: ${name(home.from)} to ${name(home.to)} ${home.driveHours} h.`);
+    }
     route.stops.forEach((stop, i) => {
       const date = route.days.find((d) => d.kind === "show" && d.marketId === stop.market.id)?.date;
       const leg = i > 0 ? route.legs[i - 1] : undefined;
